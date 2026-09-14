@@ -1,0 +1,9 @@
+"""
+Example: creative_writing - Part of ModelHop v1.0.0
+"""
+
+def main():
+    print("TODO: Implement creative_writing example")
+
+if __name__ == "__main__":
+    main()
