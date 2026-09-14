@@ -35,24 +35,26 @@
 # Install
 pip install modelhop
 
-# Initialize config
-modelhop init
-
-# Route your first query
-modelhop route "How do I reset my password?"
+# Run — shows setup guide, validates API keys, and gives you next steps
+modelhop
 ```
 
-## Setup API Keys
+That's it. Running `modelhop` with no arguments shows a welcome panel that:
 
-Get at least one API key from a free provider:
+- Validates your API keys against live provider endpoints
+- Shows which providers are connected and which are missing
+- Generates a default `modelhop.yaml` if one doesn't exist
+- Gives you quick-start examples to try immediately
+
+### Setup API Keys
+
+Get at least one key from a free provider and set it before running `modelhop`:
 
 | Provider | Key | Free Tier |
 |----------|-----|-----------|
 | Groq | [console.groq.com](https://console.groq.com) | Yes |
 | Google Gemini | [aistudio.google.com](https://aistudio.google.com/apikey) | Yes |
 | OpenAI | [platform.openai.com](https://platform.openai.com/api-keys) | Paid |
-
-Set your keys:
 
 ```bash
 # Option 1: Interactive setup (recommended)
@@ -67,6 +69,7 @@ cp .env.example .env
 
 | Command | Alias | Description |
 |---------|-------|-------------|
+| `modelhop` | - | Welcome guide — validate keys, show quick start |
 | `modelhop route <query>` | `modelhop r` | Route a query to the cheapest capable model |
 | `modelhop setup` | `modelhop set` | Interactive API key setup wizard |
 | `modelhop init` | `modelhop i` | Generate default config file |
@@ -78,7 +81,6 @@ cp .env.example .env
 | `modelhop example` | `modelhop e` | Show example usage |
 | `modelhop shield` | - | Show quality monitoring status |
 | `modelhop hub` | - | Show community hub configs |
-| `modelhop welcome` | - | Show welcome message |
 
 ## How It Works
 
