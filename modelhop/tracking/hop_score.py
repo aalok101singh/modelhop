@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from typing import Optional
+
 from ..core.models import HopScoreResult
 
 

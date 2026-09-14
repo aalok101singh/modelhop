@@ -1,9 +1,7 @@
 from typing import List, Optional
-from .models import (
-    QueryAnalysis, RoutingDecision, QueryFeatures, QueryType,
-    Tier, Experience
-)
+
 from .memory import ExperienceMemory
+from .models import QueryAnalysis, QueryFeatures, QueryType, RoutingDecision
 from .performance import PerformanceTracker
 
 

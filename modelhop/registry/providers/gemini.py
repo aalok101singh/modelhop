@@ -1,10 +1,12 @@
 import os
 import time
 import warnings
+
 warnings.filterwarnings("ignore", category=FutureWarning)
 import google.generativeai as genai
-from .base import BaseProvider
+
 from ...core.models import ProviderResponse
+from .base import BaseProvider
 
 
 class GeminiProvider(BaseProvider):

@@ -1,7 +1,8 @@
 import json
 import re
 from typing import Optional
-from .models import ConfidenceResult, ProviderResponse, QueryFeatures, QueryType
+
+from .models import ConfidenceResult, ProviderResponse, QueryFeatures
 
 CONFIDENCE_PROMPT = """Rate your confidence in this response on a scale of 0.0 to 1.0.
 

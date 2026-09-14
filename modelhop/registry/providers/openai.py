@@ -1,7 +1,9 @@
 import time
+
 from openai import AsyncOpenAI
-from .base import BaseProvider
+
 from ...core.models import ProviderResponse
+from .base import BaseProvider
 
 
 class OpenAIProvider(BaseProvider):

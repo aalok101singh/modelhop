@@ -1,6 +1,8 @@
-import yaml
 from pathlib import Path
 from typing import List, Optional
+
+import yaml
+
 from ..core.models import HubConfig
 
 COMMUNITY_CONFIGS_PATH = Path(__file__).parent.parent.parent / "data" / "community_configs"
@@ -19,7 +21,7 @@ class Hub:
             try:
                 with open(config_file, "r") as f:
                     data = yaml.safe_load(f)
-                    yaml_content = f.read() if f.readable() else ""
+                    f.read() if f.readable() else ""
 
                 configs.append(HubConfig(
                     name=data.get("name", config_file.stem),

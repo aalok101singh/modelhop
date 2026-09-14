@@ -1,8 +1,6 @@
 from typing import List
-from .models import (
-    QueryAnalysis, RoutingDecision, ModelConfig,
-    Tier, ComplexityLevel
-)
+
+from .models import ModelConfig, QueryAnalysis, RoutingDecision, Tier
 
 PREMIUM_CAPABILITIES = {"coding", "creative", "analysis", "reasoning"}
 

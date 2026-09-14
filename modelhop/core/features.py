@@ -1,6 +1,7 @@
-import re
 import math
-from typing import List, Dict, Set, Tuple
+import re
+from typing import Dict, List, Set
+
 from .models import QueryFeatures, QueryType
 
 CODE_KEYWORDS: Set[str] = {

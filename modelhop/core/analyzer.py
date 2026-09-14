@@ -1,7 +1,8 @@
 import json
 import re
-from typing import List, Optional
-from ..core.models import QueryAnalysis, ComplexityLevel, EmotionalTone
+from typing import List
+
+from ..core.models import ComplexityLevel, EmotionalTone, QueryAnalysis
 
 ANALYSIS_PROMPT = """Analyze this user query and return a JSON object with the following fields:
 
@@ -50,7 +51,6 @@ class QueryAnalyzer:
 
         prompt = ANALYSIS_PROMPT.format(query=query)
         response = None
-        last_error = None
 
         for provider in self.providers:
             try:
@@ -60,8 +60,7 @@ class QueryAnalyzer:
                     temperature=0.1
                 )
                 break
-            except Exception as e:
-                last_error = e
+            except Exception:
                 continue
 
         if response is None:

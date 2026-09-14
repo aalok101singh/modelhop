@@ -1,7 +1,7 @@
 import json
 import os
-from typing import List
 from datetime import datetime
+from typing import List
 
 ADAPTIVE_FILE = "modelhop_adaptive.json"
 

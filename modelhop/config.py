@@ -1,7 +1,9 @@
 import os
-import yaml
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
+
+import yaml
+
 from .core.models import ModelConfig, Tier
 
 DEFAULT_CONFIG_PATH = Path("modelhop.yaml")
@@ -97,7 +99,7 @@ class Config:
         models = []
         for model_data in self.config.get("models", []):
             api_key_env = model_data.get("api_key_env", "")
-            api_key = os.getenv(api_key_env, "")
+            os.getenv(api_key_env, "")
             models.append(ModelConfig(
                 name=model_data["name"],
                 provider=model_data["provider"],

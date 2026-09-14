@@ -1,7 +1,8 @@
-import os
-import click
 import asyncio
+import os
 from pathlib import Path
+
+import click
 from rich.console import Console
 from rich.panel import Panel
 
@@ -29,8 +30,8 @@ def _save_env(keys: dict) -> None:
     lines = []
     if ENV_PATH.exists():
         with open(ENV_PATH, "r") as f:
-            lines = [l for l in f.readlines() if not any(
-                l.strip().startswith(k) for k in keys if keys[k]
+            lines = [line for line in f.readlines() if not any(
+                line.strip().startswith(k) for k in keys if keys[k]
             )]
 
     for key, value in keys.items():
@@ -101,7 +102,7 @@ async def _test_connection(provider_name: str, api_key: str, model: str) -> bool
         if provider_name == "groq":
             from groq import AsyncGroq
             client = AsyncGroq(api_key=api_key)
-            r = await client.chat.completions.create(
+            await client.chat.completions.create(
                 model=model, messages=[{"role": "user", "content": "Hi"}], max_tokens=5
             )
             return True
@@ -109,12 +110,12 @@ async def _test_connection(provider_name: str, api_key: str, model: str) -> bool
             import google.generativeai as genai
             genai.configure(api_key=api_key)
             m = genai.GenerativeModel(model)
-            r = await m.generate_content_async("Hi")
+            await m.generate_content_async("Hi")
             return True
         elif provider_name == "openai":
             from openai import AsyncOpenAI
             client = AsyncOpenAI(api_key=api_key)
-            r = await client.chat.completions.create(
+            await client.chat.completions.create(
                 model=model, messages=[{"role": "user", "content": "Hi"}], max_tokens=5
             )
             return True

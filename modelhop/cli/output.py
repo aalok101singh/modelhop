@@ -1,7 +1,6 @@
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
-from rich.text import Text
+from rich.table import Table
 
 console = Console()
 
@@ -17,7 +16,7 @@ def print_header() -> None:
 
 
 def print_analysis(analysis) -> None:
-    console.print(f"  :brain: [bold]Analyzing...[/bold]")
+    console.print("  :brain: [bold]Analyzing...[/bold]")
     console.print(f"     Complexity : [cyan]{analysis.complexity:.2f}[/cyan] ({analysis.level.value})")
     console.print(f"     Capabilities : {', '.join(analysis.capabilities_needed)}")
     if analysis.emotional_tone.value != "neutral":
@@ -30,7 +29,7 @@ def print_routing(decision) -> None:
     tier_emoji = {"free": ":free:", "mid": ":warning:", "premium": ":crown:"}
     color = tier_colors.get(decision.tier.value, "white")
     emoji = tier_emoji.get(decision.tier.value, "")
-    console.print(f"  :dart: [bold]Routing...[/bold]")
+    console.print("  :dart: [bold]Routing...[/bold]")
     console.print(f"     Model : [bold green]{decision.model.name}[/bold green]")
     console.print(f"     Tier  : [{color}]{emoji} {decision.tier.value.upper()}[/{color}]")
     console.print(f"     Reason: [dim]{decision.reason}[/dim]")

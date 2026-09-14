@@ -1,7 +1,9 @@
 import time
+
 from groq import AsyncGroq
-from .base import BaseProvider
+
 from ...core.models import ProviderResponse
+from .base import BaseProvider
 
 
 class GroqProvider(BaseProvider):

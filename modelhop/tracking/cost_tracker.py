@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
 from typing import List, Optional
-from ..core.models import ProviderResponse, ModelConfig, CostAnalysis
+
+from ..core.models import CostAnalysis, ModelConfig, ProviderResponse
 
 
 class CostTracker:

@@ -1,11 +1,12 @@
 import os
-from typing import List, Optional, Dict
-from ..core.models import ModelConfig, Tier
+from typing import Dict, List, Optional
+
 from ..config import Config
-from .providers.groq import GroqProvider
-from .providers.gemini import GeminiProvider
-from .providers.openai import OpenAIProvider
+from ..core.models import ModelConfig, Tier
 from .providers.base import BaseProvider
+from .providers.gemini import GeminiProvider
+from .providers.groq import GroqProvider
+from .providers.openai import OpenAIProvider
 
 PROVIDER_MAP: Dict[str, type] = {
     "groq": GroqProvider,

@@ -1,12 +1,17 @@
-from typing import List, Optional, Dict, Tuple
 from collections import defaultdict
-from .models import (
-    QueryAnalysis, RoutingDecision, ModelConfig, QueryFeatures,
-    QueryType, Tier, ComplexityLevel, Experience
-)
-from .memory import ExperienceMemory
-from .performance import PerformanceTracker
+from typing import Dict, List, Optional, Tuple
+
 from .features import FeatureExtractor
+from .memory import ExperienceMemory
+from .models import (
+    ComplexityLevel,
+    ModelConfig,
+    QueryAnalysis,
+    QueryFeatures,
+    RoutingDecision,
+    Tier,
+)
+from .performance import PerformanceTracker
 
 MIN_EXPERIENCES_FOR_LEARNING = 3
 ESCALATION_QUALITY_THRESHOLD = 0.65
@@ -238,7 +243,7 @@ class LearningRouter:
                 return RoutingDecision(
                     model=model,
                     tier=model.tier,
-                    reason=f"Complex query: trying premium for quality comparison",
+                    reason="Complex query: trying premium for quality comparison",
                     alternatives=alternatives,
                 )
 

@@ -1,39 +1,44 @@
 """Tests for QueryAnalyzer."""
 import pytest
 from modelhop.core.analyzer import QueryAnalyzer
+from modelhop.core.models import ComplexityLevel
 
 
 class TestQueryAnalyzer:
-    """Tests for QueryAnalyzer feature extraction."""
+    """Tests for QueryAnalyzer heuristic analysis."""
 
     def test_simple_query(self):
-        analyzer = QueryAnalyzer()
-        features = analyzer.analyze("Hello, how are you?")
-        assert features.word_count == 4
-        assert features.char_count == 19
-        assert features.complexity < 0.5
+        analyzer = QueryAnalyzer(providers=[])
+        result = analyzer._heuristic_analysis("Hello, how are you?")
+        assert result.complexity < 0.6
+        assert result.level == ComplexityLevel.MEDIUM
+        assert "general" in result.capabilities_needed
 
-    def test_complex_query(self):
-        analyzer = QueryAnalyzer()
-        features = analyzer.analyze(
-            "Write a Python function that implements quicksort algorithm "
-            "with proper error handling and type hints"
+    def test_coding_query(self):
+        analyzer = QueryAnalyzer(providers=[])
+        result = analyzer._heuristic_analysis(
+            "Write a Python function to sort a list using quicksort algorithm"
         )
-        assert features.requires_code is True
-        assert features.complexity > 0.5
+        assert result.complexity >= 0.7
+        assert result.level == ComplexityLevel.COMPLEX
+        assert "coding" in result.capabilities_needed
 
-    def test_reasoning_query(self):
-        analyzer = QueryAnalyzer()
-        features = analyzer.analyze("Explain the theory of relativity in simple terms")
-        assert features.requires_reasoning is True
+    def test_algorithm_query(self):
+        analyzer = QueryAnalyzer(providers=[])
+        result = analyzer._heuristic_analysis(
+            "Implement a binary search with O(log n) time complexity"
+        )
+        assert result.complexity >= 0.7
+        assert result.level == ComplexityLevel.COMPLEX
 
-    def test_language_detection(self):
-        analyzer = QueryAnalyzer()
-        features = analyzer.analyze("This is an English sentence")
-        assert features.language == "en"
+    def test_long_query(self):
+        analyzer = QueryAnalyzer(providers=[])
+        long_query = "Explain " + " ".join(["this"] * 100)
+        result = analyzer._heuristic_analysis(long_query)
+        assert result.complexity >= 0.6
 
     def test_empty_query(self):
-        analyzer = QueryAnalyzer()
-        features = analyzer.analyze("")
-        assert features.word_count == 0
-        assert features.char_count == 0
+        analyzer = QueryAnalyzer(providers=[])
+        result = analyzer._heuristic_analysis("")
+        assert result.complexity == 0.5
+        assert result.level == ComplexityLevel.MEDIUM

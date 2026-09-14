@@ -1,9 +1,9 @@
-import click
 import asyncio
+
+import click
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.panel import Panel
-from rich.table import Table
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 console = Console()
 
@@ -97,17 +97,17 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             progress.update(task, completed=True)
 
         if not json_output:
-            console.print(f"  :mag: [bold]Feature Extraction[/bold]")
+            console.print("  :mag: [bold]Feature Extraction[/bold]")
             console.print(f"     Query Type     : [cyan]{query_features.query_type.value}[/cyan]")
             console.print(f"     Code Keywords  : {query_features.code_keyword_count}")
             console.print(f"     Algorithm Terms: {query_features.algorithm_term_count}")
             if query_features.has_constraints:
-                console.print(f"     Constraints    : [yellow]detected[/yellow]")
+                console.print("     Constraints    : [yellow]detected[/yellow]")
             if query_features.requires_optimization:
-                console.print(f"     Optimization   : [yellow]required[/yellow]")
+                console.print("     Optimization   : [yellow]required[/yellow]")
             console.print()
 
-            console.print(f"  :brain: [bold]AI Analysis[/bold]")
+            console.print("  :brain: [bold]AI Analysis[/bold]")
             console.print(f"     Base Complexity : [cyan]{analysis.complexity:.2f}[/cyan]")
             console.print(f"     Capabilities   : {', '.join(analysis.capabilities_needed)}")
             if analysis.emotional_tone.value != "neutral":
@@ -116,7 +116,7 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
 
             similar = mh.memory.find_similar(query_features, top_k=3, min_similarity=0.4)
             if similar:
-                console.print(f"  :books: [bold]Experience Memory[/bold]")
+                console.print("  :books: [bold]Experience Memory[/bold]")
                 console.print(f"     Similar queries found : [cyan]{len(similar)}[/cyan]")
                 avg_q = sum(e.response_quality for e in similar) / len(similar)
                 console.print(f"     Avg historical quality: [cyan]{avg_q:.2f}[/cyan]")
@@ -128,7 +128,7 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             tier_emoji = {"free": ":free:", "mid": ":warning:", "premium": ":crown:"}
             color = tier_colors.get(decision.tier.value, "white")
             emoji = tier_emoji.get(decision.tier.value, "")
-            console.print(f"  :dart: [bold]Routing Decision[/bold]")
+            console.print("  :dart: [bold]Routing Decision[/bold]")
             console.print(f"     Model : [bold green]{decision.model.name}[/bold green]")
             console.print(f"     Tier  : [{color}]{emoji} {decision.tier.value.upper()}[/{color}]")
             console.print(f"     Reason: {decision.reason}")
@@ -172,7 +172,7 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
                 error_msg = str(e)
                 if not json_output:
                     console.print(f"  :warning: [yellow]{model_name} failed: {_short_error(error_msg)}[/yellow]")
-                    console.print(f"  :arrow_right: [dim]Falling back to next model...[/dim]")
+                    console.print("  :arrow_right: [dim]Falling back to next model...[/dim]")
                 next_decision = _get_next_fallback(mh, decision, tried_models)
                 if next_decision is None:
                     break
@@ -329,7 +329,7 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             else:
                 score_color = "red"
                 rating_emoji = ":warning:"
-            console.print(f"  :frog: [bold]Hop Score[/bold]")
+            console.print("  :frog: [bold]Hop Score[/bold]")
             console.print(f"     Score   : [{score_color}]{score}/100[/{score_color}] {rating_emoji}")
             console.print(f"     Rating  : [{score_color}]{hop['rating']}[/{score_color}]")
             console.print(f"     Queries : [cyan]{hop['total_queries']}[/cyan] total, [cyan]{hop['optimal_routes']}[/cyan] optimal")

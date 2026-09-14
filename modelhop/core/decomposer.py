@@ -1,6 +1,7 @@
 import re
-from typing import List, Optional
-from .models import SubQuery, QueryAnalysis, ComplexityLevel, Tier
+from typing import List
+
+from .models import ComplexityLevel, QueryAnalysis, SubQuery
 
 EXPLANATION_PATTERNS = [
     r'(?:explain|describe|what is|how does|how do|why does|why do|tell me about)\s+(.+?)(?:\s+and\s+|\s*$)',
@@ -77,7 +78,7 @@ class QueryDecomposer:
         return [query]
 
     def _analyze_sub_query(self, text: str) -> QueryAnalysis:
-        text_lower = text.lower()
+        text.lower()
 
         is_code = bool(self._code_impl_pattern.search(text))
         is_explain = bool(self._explain_pattern.search(text))
