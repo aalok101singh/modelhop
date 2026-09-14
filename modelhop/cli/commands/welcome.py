@@ -1,8 +1,43 @@
+import asyncio
+
 import click
 from rich.console import Console
 from rich.panel import Panel
 
 console = Console(force_terminal=True)
+
+
+async def _test_key(provider: str, api_key: str, model: str) -> bool:
+    try:
+        if provider == "groq":
+            from groq import AsyncGroq
+
+            client = AsyncGroq(api_key=api_key)
+            await client.chat.completions.create(
+                model=model, messages=[{"role": "user", "content": "Hi"}], max_tokens=5
+            )
+            return True
+        elif provider == "gemini":
+            import os
+
+            os.environ["GOOGLE_API_KEY"] = api_key
+            import google.generativeai as genai
+
+            genai.configure(api_key=api_key)
+            m = genai.GenerativeModel(model)
+            await m.generate_content_async("Hi")
+            return True
+        elif provider == "openai":
+            from openai import AsyncOpenAI
+
+            client = AsyncOpenAI(api_key=api_key)
+            await client.chat.completions.create(
+                model=model, messages=[{"role": "user", "content": "Hi"}], max_tokens=5
+            )
+            return True
+    except Exception:
+        return False
+    return False
 
 
 @click.command()
@@ -29,13 +64,33 @@ def welcome() -> None:
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
 
-    if groq_key or gemini_key or openai_key:
+    has_any_key = groq_key or gemini_key or openai_key
+
+    if has_any_key:
         if groq_key:
-            checks.append("[green]:white_check_mark: GROQ_API_KEY set (free tier)[/green]")
+            ok = asyncio.run(_test_key("groq", groq_key, "qwen/qwen3.8-27b"))
+            if ok:
+                checks.append(
+                    "[green]:white_check_mark: GROQ_API_KEY connected (free tier)[/green]"
+                )
+            else:
+                checks.append("[red]:x: GROQ_API_KEY invalid or unreachable[/red]")
         if gemini_key:
-            checks.append("[green]:white_check_mark: GEMINI_API_KEY set (free tier)[/green]")
+            ok = asyncio.run(_test_key("gemini", gemini_key, "gemini-3.6-flash"))
+            if ok:
+                checks.append(
+                    "[green]:white_check_mark: GEMINI_API_KEY connected (free tier)[/green]"
+                )
+            else:
+                checks.append("[red]:x: GEMINI_API_KEY invalid or unreachable[/red]")
         if openai_key:
-            checks.append("[green]:white_check_mark: OPENAI_API_KEY set (premium tier)[/green]")
+            ok = asyncio.run(_test_key("openai", openai_key, "gpt-4"))
+            if ok:
+                checks.append(
+                    "[green]:white_check_mark: OPENAI_API_KEY connected (premium tier)[/green]"
+                )
+            else:
+                checks.append("[red]:x: OPENAI_API_KEY invalid or unreachable[/red]")
     else:
         checks.append("[red]:x: No API keys found[/red]")
         checks.append("   Run [cyan]modelhop setup[/cyan] to configure")
