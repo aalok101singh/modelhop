@@ -1,10 +1,11 @@
-import click
 import asyncio
 import json as json_mod
 from pathlib import Path
+
+import click
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 console = Console()
 
@@ -20,7 +21,9 @@ def benchmark(queries: int, json_output: bool) -> None:
 async def _benchmark_async(query_count: int, json_output: bool) -> None:
     from modelhop import ModelHop
 
-    benchmark_path = Path(__file__).parent.parent.parent.parent / "data" / "benchmarks" / "default.json"
+    benchmark_path = (
+        Path(__file__).parent.parent.parent.parent / "data" / "benchmarks" / "default.json"
+    )
     if benchmark_path.exists():
         with open(benchmark_path) as f:
             data = json_mod.load(f)
@@ -49,19 +52,21 @@ async def _benchmark_async(query_count: int, json_output: bool) -> None:
 
     if not json_output:
         console.print()
-        console.print(Panel(
-            f"[bold green]:frog: Running benchmark with {query_count} queries...[/bold green]",
-            border_style="green",
-        ))
+        console.print(
+            Panel(
+                f"[bold green]:frog: Running benchmark with {query_count} queries...[/bold green]",
+                border_style="green",
+            )
+        )
         console.print()
 
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console,
-        transient=True
+        transient=True,
     ) as progress:
-        task = progress.add_task(f"  :bar_chart: Processing queries...", total=query_count)
+        task = progress.add_task("  :bar_chart: Processing queries...", total=query_count)
 
         for i, query in enumerate(query_list):
             try:
@@ -93,23 +98,28 @@ async def _benchmark_async(query_count: int, json_output: bool) -> None:
 
     if success_count == 0:
         console.print()
-        console.print(Panel(
-            "[red]:x: No queries completed successfully[/red]\n\n"
-            "Check your API key and try again.",
-            title=":warning: Benchmark Failed",
-            border_style="red",
-        ))
+        console.print(
+            Panel(
+                "[red]:x: No queries completed successfully[/red]\n\n"
+                "Check your API key and try again.",
+                title=":warning: Benchmark Failed",
+                border_style="red",
+            )
+        )
         console.print()
         return
 
     avg_gpt4_latency = total_gpt4_latency / success_count
     avg_modelhop_latency = total_modelhop_latency / success_count
     savings_pct = (modelhop_savings_total / gpt4_total_cost * 100) if gpt4_total_cost > 0 else 0
-    latency_improvement = ((avg_gpt4_latency - avg_modelhop_latency) / avg_gpt4_latency * 100) if avg_gpt4_latency > 0 else 0
+    latency_improvement = (
+        ((avg_gpt4_latency - avg_modelhop_latency) / avg_gpt4_latency * 100)
+        if avg_gpt4_latency > 0
+        else 0
+    )
 
     distribution_pcts = {
-        name: round(count / success_count * 100, 1)
-        for name, count in model_distribution.items()
+        name: round(count / success_count * 100, 1) for name, count in model_distribution.items()
     }
 
     results = {
@@ -124,19 +134,22 @@ async def _benchmark_async(query_count: int, json_output: bool) -> None:
         "gpt4_quality": 98,
         "modelhop_quality": 97,
         "quality_delta": -1,
-        "distribution": distribution_pcts
+        "distribution": distribution_pcts,
     }
 
     if json_output:
         console.print(json_mod.dumps(results, indent=2))
     else:
         from modelhop.cli.output import print_benchmark_results, print_distribution
+
         console.print()
-        console.print(Panel(
-            f"[bold green]:white_check_mark: Benchmark Complete: {success_count} queries processed[/bold green]",
-            title=":frog: Benchmark Results",
-            border_style="green",
-        ))
+        console.print(
+            Panel(
+                f"[bold green]:white_check_mark: Benchmark Complete: {success_count} queries processed[/bold green]",
+                title=":frog: Benchmark Results",
+                border_style="green",
+            )
+        )
         console.print()
         print_benchmark_results(results)
         print_distribution(distribution_pcts)

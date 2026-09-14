@@ -1,5 +1,6 @@
-import click
 import json as json_mod
+
+import click
 from rich.console import Console
 from rich.panel import Panel
 
@@ -31,7 +32,7 @@ def status(json_output: bool) -> None:
             "consensus_rate": shield_status.consensus_rate,
             "alerts": shield_status.alerts,
             "adjustments_today": shield_status.adjustments_today,
-            "recommendations": recommendations
+            "recommendations": recommendations,
         }
         console.print(json_mod.dumps(output, indent=2))
     else:
@@ -56,10 +57,12 @@ def status(json_output: bool) -> None:
                 content += f"  :bulb: {rec}\n"
 
         console.print()
-        console.print(Panel(
-            content,
-            title=":shield: ModelHop Shield",
-            border_style="green" if shield_status.active else "red",
-            padding=(0, 1),
-        ))
+        console.print(
+            Panel(
+                content,
+                title=":shield: ModelHop Shield",
+                border_style="green" if shield_status.active else "red",
+                padding=(0, 1),
+            )
+        )
         console.print()

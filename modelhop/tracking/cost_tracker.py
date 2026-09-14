@@ -21,31 +21,31 @@ class CostTracker:
             with open(self.log_path, "r") as f:
                 log = json.load(f)
             for entry in log.get("entries", []):
-                self.history.append(CostAnalysis(
-                    actual_cost=entry["actual_cost"],
-                    would_have_cost=entry["would_have_cost"],
-                    savings=entry["savings"],
-                    savings_percentage=(entry["savings"] / entry["would_have_cost"] * 100) if entry["would_have_cost"] > 0 else 0,
-                    model_used=entry["model"],
-                    tier=entry["tier"],
-                ))
+                self.history.append(
+                    CostAnalysis(
+                        actual_cost=entry["actual_cost"],
+                        would_have_cost=entry["would_have_cost"],
+                        savings=entry["savings"],
+                        savings_percentage=(
+                            (entry["savings"] / entry["would_have_cost"] * 100)
+                            if entry["would_have_cost"] > 0
+                            else 0
+                        ),
+                        model_used=entry["model"],
+                        tier=entry["tier"],
+                    )
+                )
         except Exception:
             pass
 
-    def calculate(
-        self,
-        response: ProviderResponse,
-        model: ModelConfig
-    ) -> CostAnalysis:
-        actual_cost = (
-            (response.tokens_in / 1000) * model.cost_per_1k_input +
-            (response.tokens_out / 1000) * model.cost_per_1k_output
-        )
+    def calculate(self, response: ProviderResponse, model: ModelConfig) -> CostAnalysis:
+        actual_cost = (response.tokens_in / 1000) * model.cost_per_1k_input + (
+            response.tokens_out / 1000
+        ) * model.cost_per_1k_output
 
-        would_have_cost = (
-            (response.tokens_in / 1000) * self.GPT4_COST_PER_1K_INPUT +
-            (response.tokens_out / 1000) * self.GPT4_COST_PER_1K_OUTPUT
-        )
+        would_have_cost = (response.tokens_in / 1000) * self.GPT4_COST_PER_1K_INPUT + (
+            response.tokens_out / 1000
+        ) * self.GPT4_COST_PER_1K_OUTPUT
 
         savings = would_have_cost - actual_cost
         savings_percentage = (savings / would_have_cost * 100) if would_have_cost > 0 else 0
@@ -56,7 +56,7 @@ class CostTracker:
             savings=savings,
             savings_percentage=savings_percentage,
             model_used=model.name,
-            tier=model.tier.value
+            tier=model.tier.value,
         )
 
         self.history.append(analysis)
@@ -73,13 +73,15 @@ class CostTracker:
 
             log["total_cost"] = sum(c.actual_cost for c in self.history)
             log["total_savings"] = sum(c.savings for c in self.history)
-            log["entries"].append({
-                "model": analysis.model_used,
-                "tier": analysis.tier,
-                "actual_cost": analysis.actual_cost,
-                "would_have_cost": analysis.would_have_cost,
-                "savings": analysis.savings
-            })
+            log["entries"].append(
+                {
+                    "model": analysis.model_used,
+                    "tier": analysis.tier,
+                    "actual_cost": analysis.actual_cost,
+                    "would_have_cost": analysis.would_have_cost,
+                    "savings": analysis.savings,
+                }
+            )
 
             with open(self.log_path, "w") as f:
                 json.dump(log, f, indent=2)
@@ -88,12 +90,7 @@ class CostTracker:
 
     def get_summary(self) -> dict:
         if not self.history:
-            return {
-                "total_cost": 0,
-                "total_savings": 0,
-                "savings_percentage": 0,
-                "query_count": 0
-            }
+            return {"total_cost": 0, "total_savings": 0, "savings_percentage": 0, "query_count": 0}
 
         total_cost = sum(c.actual_cost for c in self.history)
         total_savings = sum(c.savings for c in self.history)
@@ -102,6 +99,8 @@ class CostTracker:
         return {
             "total_cost": total_cost,
             "total_savings": total_savings,
-            "savings_percentage": (total_savings / total_would_have * 100) if total_would_have > 0 else 0,
-            "query_count": len(self.history)
+            "savings_percentage": (
+                (total_savings / total_would_have * 100) if total_would_have > 0 else 0
+            ),
+            "query_count": len(self.history),
         }

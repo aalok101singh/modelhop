@@ -11,10 +11,7 @@ class BaseProvider(ABC):
 
     @abstractmethod
     async def generate(
-        self,
-        prompt: str,
-        max_tokens: int = 1000,
-        temperature: float = 0.7
+        self, prompt: str, max_tokens: int = 1000, temperature: float = 0.7
     ) -> ProviderResponse:
         pass
 

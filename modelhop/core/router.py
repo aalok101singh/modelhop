@@ -13,16 +13,12 @@ class Router:
     def _sort_models(self) -> None:
         tier_order = {Tier.FREE: 0, Tier.MID: 1, Tier.PREMIUM: 2}
         self.models.sort(
-            key=lambda m: (
-                tier_order.get(m.tier, 3),
-                m.cost_per_1k_input + m.cost_per_1k_output
-            )
+            key=lambda m: (tier_order.get(m.tier, 3), m.cost_per_1k_input + m.cost_per_1k_output)
         )
 
     def route(self, analysis: QueryAnalysis) -> RoutingDecision:
         capable_models = [
-            m for m in self.models
-            if self._has_capabilities(m, analysis.capabilities_needed)
+            m for m in self.models if self._has_capabilities(m, analysis.capabilities_needed)
         ]
 
         needs_premium = self._needs_premium_model(analysis)
@@ -34,10 +30,7 @@ class Router:
                 alternatives = [m for m in capable_models if m.name != selected.name][:2]
                 reason = self._build_reason(analysis, selected)
                 return RoutingDecision(
-                    model=selected,
-                    tier=selected.tier,
-                    reason=reason,
-                    alternatives=alternatives
+                    model=selected, tier=selected.tier, reason=reason, alternatives=alternatives
                 )
 
         if not capable_models:
@@ -48,10 +41,7 @@ class Router:
         reason = self._build_reason(analysis, selected)
 
         return RoutingDecision(
-            model=selected,
-            tier=selected.tier,
-            reason=reason,
-            alternatives=alternatives
+            model=selected, tier=selected.tier, reason=reason, alternatives=alternatives
         )
 
     def _needs_premium_model(self, analysis: QueryAnalysis) -> bool:
@@ -71,7 +61,7 @@ class Router:
             model=model,
             tier=model.tier,
             reason=f"Forced model selection: {model_name}",
-            alternatives=alternatives
+            alternatives=alternatives,
         )
 
     def _has_capabilities(self, model: ModelConfig, required: List[str]) -> bool:
@@ -80,9 +70,7 @@ class Router:
         return all(cap in model.capabilities for cap in required)
 
     def _select_by_complexity(
-        self,
-        analysis: QueryAnalysis,
-        capable_models: List[ModelConfig]
+        self, analysis: QueryAnalysis, capable_models: List[ModelConfig]
     ) -> ModelConfig:
         complexity = analysis.complexity
 

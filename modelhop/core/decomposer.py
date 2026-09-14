@@ -4,19 +4,16 @@ from typing import List
 from .models import ComplexityLevel, QueryAnalysis, SubQuery
 
 EXPLANATION_PATTERNS = [
-    r'(?:explain|describe|what is|how does|how do|why does|why do|tell me about)\s+(.+?)(?:\s+and\s+|\s*$)',
-    r'(.+?)\s+(?:and|also)\s+(?:explain|describe|tell me about)\s+(.+)',
+    r"(?:explain|describe|what is|how does|how do|why does|why do|tell me about)\s+(.+?)(?:\s+and\s+|\s*$)",
+    r"(.+?)\s+(?:and|also)\s+(?:explain|describe|tell me about)\s+(.+)",
 ]
 
 CODE_PATTERNS = [
-    r'(?:write|implement|create|build|code)\s+(?:a|an|the)\s+(.+?)(?:\s+and\s+|\s*$)',
-    r'(.+?)\s+(?:and|also)\s+(?:write|implement|create|build|code)\s+(?:a|an|the)\s+(.+)',
+    r"(?:write|implement|create|build|code)\s+(?:a|an|the)\s+(.+?)(?:\s+and\s+|\s*$)",
+    r"(.+?)\s+(?:and|also)\s+(?:write|implement|create|build|code)\s+(?:a|an|the)\s+(.+)",
 ]
 
-AND_SPLIT = re.compile(
-    r'\s+(?:and|also|additionally|plus|then)\s+',
-    re.IGNORECASE
-)
+AND_SPLIT = re.compile(r"\s+(?:and|also|additionally|plus|then)\s+", re.IGNORECASE)
 
 
 class QueryDecomposer:
@@ -24,21 +21,14 @@ class QueryDecomposer:
 
     def __init__(self):
         self._code_impl_pattern = re.compile(
-            r'\b(?:write|implement|create|build|code|develop)\b',
-            re.IGNORECASE
+            r"\b(?:write|implement|create|build|code|develop)\b", re.IGNORECASE
         )
         self._explain_pattern = re.compile(
-            r'\b(?:explain|describe|what is|how does|how do|why|tell me about)\b',
-            re.IGNORECASE
+            r"\b(?:explain|describe|what is|how does|how do|why|tell me about)\b", re.IGNORECASE
         )
-        self._and_pattern = re.compile(
-            r'\s+(?:and|also|additionally|plus|then)\s+',
-            re.IGNORECASE
-        )
+        self._and_pattern = re.compile(r"\s+(?:and|also|additionally|plus|then)\s+", re.IGNORECASE)
 
-    def decompose(
-        self, query: str, analysis: QueryAnalysis
-    ) -> List[SubQuery]:
+    def decompose(self, query: str, analysis: QueryAnalysis) -> List[SubQuery]:
         if analysis.complexity < 0.65:
             return [SubQuery(query=query, analysis=analysis, purpose="complete")]
 
@@ -55,13 +45,19 @@ class QueryDecomposer:
 
             sub_analysis = self._analyze_sub_query(part)
             purpose = self._determine_purpose(part)
-            sub_queries.append(SubQuery(
-                query=part,
-                analysis=sub_analysis,
-                purpose=purpose,
-            ))
+            sub_queries.append(
+                SubQuery(
+                    query=part,
+                    analysis=sub_analysis,
+                    purpose=purpose,
+                )
+            )
 
-        return sub_queries if sub_queries else [SubQuery(query=query, analysis=analysis, purpose="complete")]
+        return (
+            sub_queries
+            if sub_queries
+            else [SubQuery(query=query, analysis=analysis, purpose="complete")]
+        )
 
     def _split_query(self, query: str) -> List[str]:
         splits = self._and_pattern.split(query)
@@ -131,11 +127,15 @@ class QueryDecomposer:
         if not sub_responses:
             return ""
         if len(sub_responses) == 1:
-            return sub_responses[0].content if hasattr(sub_responses[0], 'content') else str(sub_responses[0])
+            return (
+                sub_responses[0].content
+                if hasattr(sub_responses[0], "content")
+                else str(sub_responses[0])
+            )
 
         parts = []
         for sr in sub_responses:
-            content = sr.content if hasattr(sr, 'content') else str(sr)
+            content = sr.content if hasattr(sr, "content") else str(sr)
             parts.append(content)
 
         return "\n\n---\n\n".join(parts)

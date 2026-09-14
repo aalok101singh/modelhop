@@ -56,18 +56,12 @@ class AdaptiveThreshold:
         self.history.append(outcome_quality)
 
         if len(self.recent_outcomes) >= self.window_size:
-            avg = sum(self.recent_outcomes[-self.window_size:]) / self.window_size
+            avg = sum(self.recent_outcomes[-self.window_size :]) / self.window_size
 
             if avg > 0.85:
-                self.threshold = max(
-                    self.min_threshold,
-                    self.threshold - self.adjustment_rate
-                )
+                self.threshold = max(self.min_threshold, self.threshold - self.adjustment_rate)
             elif avg < 0.7:
-                self.threshold = min(
-                    self.max_threshold,
-                    self.threshold + self.adjustment_rate
-                )
+                self.threshold = min(self.max_threshold, self.threshold + self.adjustment_rate)
 
             self.recent_outcomes = []
 

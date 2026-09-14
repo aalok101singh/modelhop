@@ -95,8 +95,7 @@ class ReasoningEngine:
 
         if model_qualities:
             best_model = max(
-                model_qualities,
-                key=lambda m: sum(model_qualities[m]) / len(model_qualities[m])
+                model_qualities, key=lambda m: sum(model_qualities[m]) / len(model_qualities[m])
             )
             best_avg = sum(model_qualities[best_model]) / len(model_qualities[best_model])
             parts.append(f"Best historical: {best_model} ({best_avg:.2f})")

@@ -40,7 +40,7 @@ EXAMPLE_CONFIG = {
             "capabilities": ["faq", "general", "classification", "reasoning", "coding"],
             "cost_per_1k_input": 0.0,
             "cost_per_1k_output": 0.0,
-            "api_key_env": "GROQ_API_KEY"
+            "api_key_env": "GROQ_API_KEY",
         },
         {
             "name": "gemini-3.6-flash",
@@ -50,7 +50,7 @@ EXAMPLE_CONFIG = {
             "capabilities": ["faq", "general", "reasoning"],
             "cost_per_1k_input": 0.0,
             "cost_per_1k_output": 0.0,
-            "api_key_env": "GEMINI_API_KEY"
+            "api_key_env": "GEMINI_API_KEY",
         },
         {
             "name": "openai-gpt-4",
@@ -60,23 +60,17 @@ EXAMPLE_CONFIG = {
             "capabilities": ["reasoning", "coding", "analysis", "creative"],
             "cost_per_1k_input": 0.03,
             "cost_per_1k_output": 0.06,
-            "api_key_env": "OPENAI_API_KEY"
-        }
+            "api_key_env": "OPENAI_API_KEY",
+        },
     ],
     "routing": {
         "confidence_threshold": 0.7,
         "cross_model_consensus": True,
         "fallback": "cascade",
-        "max_retries": 3
+        "max_retries": 3,
     },
-    "shield": {
-        "enabled": True,
-        "quality_threshold": 0.8
-    },
-    "tracking": {
-        "log_queries": True,
-        "log_costs": True
-    }
+    "shield": {"enabled": True, "quality_threshold": 0.8},
+    "tracking": {"log_queries": True, "log_costs": True},
 }
 
 
@@ -100,16 +94,18 @@ class Config:
         for model_data in self.config.get("models", []):
             api_key_env = model_data.get("api_key_env", "")
             os.getenv(api_key_env, "")
-            models.append(ModelConfig(
-                name=model_data["name"],
-                provider=model_data["provider"],
-                model=model_data["model"],
-                tier=Tier(model_data["tier"]),
-                capabilities=model_data.get("capabilities", []),
-                cost_per_1k_input=model_data.get("cost_per_1k_input", 0.0),
-                cost_per_1k_output=model_data.get("cost_per_1k_output", 0.0),
-                api_key_env=api_key_env
-            ))
+            models.append(
+                ModelConfig(
+                    name=model_data["name"],
+                    provider=model_data["provider"],
+                    model=model_data["model"],
+                    tier=Tier(model_data["tier"]),
+                    capabilities=model_data.get("capabilities", []),
+                    cost_per_1k_input=model_data.get("cost_per_1k_input", 0.0),
+                    cost_per_1k_output=model_data.get("cost_per_1k_output", 0.0),
+                    api_key_env=api_key_env,
+                )
+            )
         return models
 
     def get_routing_config(self) -> Dict[str, Any]:

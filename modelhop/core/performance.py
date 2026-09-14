@@ -37,10 +37,7 @@ class PerformanceTracker:
 
     def _persist(self):
         path = self._get_path()
-        data = {
-            "version": "1.0",
-            "profiles": {}
-        }
+        data = {"version": "1.0", "profiles": {}}
         for name, profile in self.profiles.items():
             data["profiles"][name] = profile.dict()
         try:

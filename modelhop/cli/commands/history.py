@@ -1,8 +1,9 @@
-import click
 import json as json_mod
+
+import click
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 
 console = Console()
 
@@ -20,27 +21,31 @@ def history(limit: int, json_output: bool) -> None:
     if json_output:
         output = []
         for entry in entries:
-            output.append({
-                "query_id": entry.query_id,
-                "query": entry.query,
-                "model": entry.decision.model.name,
-                "tier": entry.decision.tier.value,
-                "confidence": entry.confidence.score,
-                "cost": entry.cost.actual_cost,
-                "savings": entry.cost.savings,
-                "latency_ms": entry.total_latency_ms,
-                "fallback_used": entry.fallback_used
-            })
+            output.append(
+                {
+                    "query_id": entry.query_id,
+                    "query": entry.query,
+                    "model": entry.decision.model.name,
+                    "tier": entry.decision.tier.value,
+                    "confidence": entry.confidence.score,
+                    "cost": entry.cost.actual_cost,
+                    "savings": entry.cost.savings,
+                    "latency_ms": entry.total_latency_ms,
+                    "fallback_used": entry.fallback_used,
+                }
+            )
         console.print(json_mod.dumps(output, indent=2))
     else:
         if not entries:
             console.print()
-            console.print(Panel(
-                "[yellow]No routing history yet.[/yellow]\n\n"
-                "Run [cyan]modelhop route \"your query\"[/cyan] to get started!",
-                title=":frog: Routing History",
-                border_style="cyan",
-            ))
+            console.print(
+                Panel(
+                    "[yellow]No routing history yet.[/yellow]\n\n"
+                    'Run [cyan]modelhop route "your query"[/cyan] to get started!',
+                    title=":frog: Routing History",
+                    border_style="cyan",
+                )
+            )
             console.print()
             return
 
@@ -69,7 +74,7 @@ def history(limit: int, json_output: bool) -> None:
                 f"[{color}]{entry.decision.tier.value}[/{color}]",
                 f"{entry.confidence.score:.2f}",
                 f"${entry.cost.actual_cost:.4f}",
-                f"{entry.total_latency_ms}ms"
+                f"{entry.total_latency_ms}ms",
             )
 
         console.print()

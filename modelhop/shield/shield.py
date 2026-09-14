@@ -44,21 +44,12 @@ class Shield:
     def get_status(self) -> ShieldStatus:
         if not self.history:
             return ShieldStatus(
-                active=True,
-                quality_score=1.0,
-                consensus_rate=1.0,
-                alerts=[],
-                adjustments_today=0
+                active=True, quality_score=1.0, consensus_rate=1.0, alerts=[], adjustments_today=0
             )
 
-        quality_score = sum(
-            t.confidence.score for t in self.history
-        ) / len(self.history)
+        quality_score = sum(t.confidence.score for t in self.history) / len(self.history)
 
-        consensus_count = sum(
-            1 for t in self.history
-            if t.confidence.consensus_score is not None
-        )
+        consensus_count = sum(1 for t in self.history if t.confidence.consensus_score is not None)
         consensus_rate = consensus_count / len(self.history) if self.history else 1.0
 
         return ShieldStatus(
@@ -66,7 +57,7 @@ class Shield:
             quality_score=quality_score,
             consensus_rate=consensus_rate,
             alerts=self.alerts[-5:],
-            adjustments_today=self.adjustments
+            adjustments_today=self.adjustments,
         )
 
     def get_recommendations(self) -> List[str]:
@@ -84,8 +75,6 @@ class Shield:
             )
 
         if len(self.alerts) > 10:
-            recommendations.append(
-                "High alert count. Review routing configuration"
-            )
+            recommendations.append("High alert count. Review routing configuration")
 
         return recommendations

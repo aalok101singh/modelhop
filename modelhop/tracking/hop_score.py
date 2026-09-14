@@ -50,7 +50,7 @@ class HopScore:
             score=self.get_score(),
             total_queries=self.total_queries,
             optimal_routes=self.optimal_routes,
-            rating=self.get_rating()
+            rating=self.get_rating(),
         )
 
     def get_stats(self) -> dict:
@@ -58,5 +58,5 @@ class HopScore:
             "score": self.get_score(),
             "rating": self.get_rating(),
             "total_queries": self.total_queries,
-            "optimal_routes": self.optimal_routes
+            "optimal_routes": self.optimal_routes,
         }

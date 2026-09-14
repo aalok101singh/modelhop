@@ -7,17 +7,21 @@ console = Console()
 
 def print_header() -> None:
     console.print()
-    console.print(Panel(
-        "[bold green]:frog: ModelHop v1.0.0[/bold green]\n[dim]Save 60-90% on LLM costs by hopping to the right model[/dim]",
-        border_style="green",
-        padding=(0, 2),
-    ))
+    console.print(
+        Panel(
+            "[bold green]:frog: ModelHop v1.0.0[/bold green]\n[dim]Save 60-90% on LLM costs by hopping to the right model[/dim]",
+            border_style="green",
+            padding=(0, 2),
+        )
+    )
     console.print()
 
 
 def print_analysis(analysis) -> None:
     console.print("  :brain: [bold]Analyzing...[/bold]")
-    console.print(f"     Complexity : [cyan]{analysis.complexity:.2f}[/cyan] ({analysis.level.value})")
+    console.print(
+        f"     Complexity : [cyan]{analysis.complexity:.2f}[/cyan] ({analysis.level.value})"
+    )
     console.print(f"     Capabilities : {', '.join(analysis.capabilities_needed)}")
     if analysis.emotional_tone.value != "neutral":
         console.print(f"     Tone : [yellow]{analysis.emotional_tone.value}[/yellow]")
@@ -37,12 +41,14 @@ def print_routing(decision) -> None:
 
 
 def print_response(response) -> None:
-    console.print(Panel(
-        response.content,
-        title=":bulb: Response",
-        border_style="cyan",
-        padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            response.content,
+            title=":bulb: Response",
+            border_style="cyan",
+            padding=(0, 1),
+        )
+    )
     console.print()
 
 
@@ -55,15 +61,17 @@ def print_cost(cost) -> None:
     else:
         badge = "[dim]Some savings[/dim]"
 
-    console.print(Panel(
-        f"[green]:moneybag: Actual cost:          ${cost.actual_cost:.4f}[/green]\n"
-        f"[red]:x: Would cost (GPT-4):  ${cost.would_have_cost:.4f}[/red]\n"
-        f"[bold green]:sparkles: You saved:            ${cost.savings:.4f} ({cost.savings_percentage:.0f}%)[/bold green]\n"
-        f"{badge}",
-        title=":money_with_wings: Cost Analysis",
-        border_style="yellow",
-        padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            f"[green]:moneybag: Actual cost:          ${cost.actual_cost:.4f}[/green]\n"
+            f"[red]:x: Would cost (GPT-4):  ${cost.would_have_cost:.4f}[/red]\n"
+            f"[bold green]:sparkles: You saved:            ${cost.savings:.4f} ({cost.savings_percentage:.0f}%)[/bold green]\n"
+            f"{badge}",
+            title=":money_with_wings: Cost Analysis",
+            border_style="yellow",
+            padding=(0, 1),
+        )
+    )
     console.print()
 
 
@@ -98,25 +106,25 @@ def print_benchmark_results(results: dict) -> None:
         "Total Cost",
         f"${results['gpt4_cost']:.2f}",
         f"${results['modelhop_cost']:.2f}",
-        f"{results['savings_pct']:.1f}%"
+        f"{results['savings_pct']:.1f}%",
     )
     table.add_row(
         "Avg Cost/Query",
         f"${results['gpt4_avg']:.4f}",
         f"${results['modelhop_avg']:.4f}",
-        f"{results['savings_pct']:.1f}%"
+        f"{results['savings_pct']:.1f}%",
     )
     table.add_row(
         "Avg Latency",
         f"{results['gpt4_latency']:.1f}s",
         f"{results['modelhop_latency']:.1f}s",
-        f"{results['latency_improvement']:.1f}%"
+        f"{results['latency_improvement']:.1f}%",
     )
     table.add_row(
         "Quality Score",
         f"{results['gpt4_quality']:.0f}%",
         f"{results['modelhop_quality']:.0f}%",
-        f"{results['quality_delta']:.1f}%"
+        f"{results['quality_delta']:.1f}%",
     )
 
     console.print(table)
@@ -147,10 +155,12 @@ def print_hop_score(score: int) -> None:
         color = "red"
         badge = ":warning: NEEDS IMPROVEMENT"
 
-    console.print(Panel(
-        f"[bold {color}]{score}/100[/{color}]  {badge}",
-        title=":frog: Hop Score",
-        border_style=color,
-        padding=(0, 2),
-    ))
+    console.print(
+        Panel(
+            f"[bold {color}]{score}/100[/{color}]  {badge}",
+            title=":frog: Hop Score",
+            border_style=color,
+            padding=(0, 2),
+        )
+    )
     console.print()

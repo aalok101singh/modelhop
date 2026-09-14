@@ -16,6 +16,7 @@ PROVIDER_MAP: Dict[str, type] = {
 
 try:
     from .providers.anthropic import AnthropicProvider
+
     PROVIDER_MAP["anthropic"] = AnthropicProvider
 except ImportError:
     pass
@@ -72,8 +73,7 @@ class ModelRegistry:
         if not candidates:
             candidates = self._models
         tier_order = {Tier.FREE: 0, Tier.MID: 1, Tier.PREMIUM: 2}
-        candidates.sort(key=lambda m: (
-            tier_order.get(m.tier, 3),
-            m.cost_per_1k_input + m.cost_per_1k_output
-        ))
+        candidates.sort(
+            key=lambda m: (tier_order.get(m.tier, 3), m.cost_per_1k_input + m.cost_per_1k_output)
+        )
         return candidates[0] if candidates else None
