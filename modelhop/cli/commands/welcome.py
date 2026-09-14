@@ -6,35 +6,49 @@ from rich.panel import Panel
 
 console = Console(force_terminal=True)
 
+PROBE_TIMEOUT = 5
 
-async def _test_key(provider: str, api_key: str, model: str) -> bool:
+
+async def _test_groq(api_key: str, model: str) -> bool:
+    from groq import AsyncGroq
+
+    client = AsyncGroq(api_key=api_key, max_retries=0)
+    await asyncio.wait_for(
+        client.chat.completions.create(
+            model=model, messages=[{"role": "user", "content": "Hi"}], max_tokens=5
+        ),
+        timeout=PROBE_TIMEOUT,
+    )
+    return True
+
+
+async def _test_gemini(api_key: str, model: str) -> bool:
+    import google.generativeai as genai
+
+    genai.configure(api_key=api_key)
+    m = genai.GenerativeModel(model)
+    await asyncio.wait_for(m.generate_content_async("Hi"), timeout=PROBE_TIMEOUT)
+    return True
+
+
+async def _test_openai(api_key: str, model: str) -> bool:
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=api_key, max_retries=0, timeout=PROBE_TIMEOUT)
+    await client.chat.completions.create(
+        model=model, messages=[{"role": "user", "content": "Hi"}], max_tokens=5
+    )
+    return True
+
+
+async def _probe_provider(provider: str, api_key: str, model: str) -> bool:
     try:
         if provider == "groq":
-            from groq import AsyncGroq
-
-            client = AsyncGroq(api_key=api_key)
-            await client.chat.completions.create(
-                model=model, messages=[{"role": "user", "content": "Hi"}], max_tokens=5
-            )
-            return True
+            return await _test_groq(api_key, model)
         elif provider == "gemini":
-            import os
-
-            os.environ["GOOGLE_API_KEY"] = api_key
-            import google.generativeai as genai
-
-            genai.configure(api_key=api_key)
-            m = genai.GenerativeModel(model)
-            await m.generate_content_async("Hi")
-            return True
+            return await _test_gemini(api_key, model)
         elif provider == "openai":
-            from openai import AsyncOpenAI
-
-            client = AsyncOpenAI(api_key=api_key)
-            await client.chat.completions.create(
-                model=model, messages=[{"role": "user", "content": "Hi"}], max_tokens=5
-            )
-            return True
+            return await _test_openai(api_key, model)
     except Exception:
         return False
     return False
@@ -45,6 +59,8 @@ def welcome() -> None:
     """:frog: Welcome to ModelHop - quick setup guide."""
     import os
     from pathlib import Path
+
+    from modelhop.config import Config
 
     console.print()
     console.print(
@@ -60,38 +76,44 @@ def welcome() -> None:
 
     checks = []
 
-    groq_key = os.environ.get("GROQ_API_KEY", "")
-    gemini_key = os.environ.get("GEMINI_API_KEY", "")
-    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    cfg = Config()
+    models = cfg.get_models()
 
-    has_any_key = groq_key or gemini_key or openai_key
+    seen_providers = {}
+    for m in models:
+        if m.provider not in seen_providers:
+            seen_providers[m.provider] = m
 
-    if has_any_key:
-        if groq_key:
-            ok = asyncio.run(_test_key("groq", groq_key, "qwen/qwen3.8-27b"))
-            if ok:
-                checks.append(
-                    "[green]:white_check_mark: GROQ_API_KEY connected (free tier)[/green]"
-                )
-            else:
-                checks.append("[red]:x: GROQ_API_KEY invalid or unreachable[/red]")
-        if gemini_key:
-            ok = asyncio.run(_test_key("gemini", gemini_key, "gemini-3.6-flash"))
-            if ok:
-                checks.append(
-                    "[green]:white_check_mark: GEMINI_API_KEY connected (free tier)[/green]"
-                )
-            else:
-                checks.append("[red]:x: GEMINI_API_KEY invalid or unreachable[/red]")
-        if openai_key:
-            ok = asyncio.run(_test_key("openai", openai_key, "gpt-4"))
-            if ok:
-                checks.append(
-                    "[green]:white_check_mark: OPENAI_API_KEY connected (premium tier)[/green]"
-                )
-            else:
-                checks.append("[red]:x: OPENAI_API_KEY invalid or unreachable[/red]")
-    else:
+    async def _run_all_probes():
+        results = {}
+        for provider, m in seen_providers.items():
+            api_key = os.environ.get(m.api_key_env, "")
+            if not api_key:
+                results[provider] = None
+                continue
+            results[provider] = await _probe_provider(provider, api_key, m.model)
+        return results
+
+    results = asyncio.run(_run_all_probes()) if seen_providers else {}
+
+    any_key_found = False
+    for provider, m in seen_providers.items():
+        api_key = os.environ.get(m.api_key_env, "")
+        if not api_key:
+            continue
+        any_key_found = True
+        ok = results.get(provider)
+        provider_upper = provider.upper()
+        if ok:
+            checks.append(
+                f"[green]:white_check_mark: {provider_upper} connected ({m.model})[/green]"
+            )
+        else:
+            checks.append(
+                f"[red]:x: {provider_upper} key invalid or model {m.model} unreachable[/red]"
+            )
+
+    if not any_key_found:
         checks.append("[red]:x: No API keys found[/red]")
         checks.append("   Run [cyan]modelhop setup[/cyan] to configure")
 
