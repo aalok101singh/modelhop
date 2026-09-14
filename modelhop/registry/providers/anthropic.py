@@ -1,7 +1,9 @@
 import time
+
 from anthropic import AsyncAnthropic
-from .base import BaseProvider
+
 from ...core.models import ProviderResponse
+from .base import BaseProvider
 
 
 class AnthropicProvider(BaseProvider):
@@ -10,17 +12,14 @@ class AnthropicProvider(BaseProvider):
         self.client = AsyncAnthropic(api_key=api_key)
 
     async def generate(
-        self,
-        prompt: str,
-        max_tokens: int = 1000,
-        temperature: float = 0.7
+        self, prompt: str, max_tokens: int = 1000, temperature: float = 0.7
     ) -> ProviderResponse:
         start_time = time.time()
         response = await self.client.messages.create(
             model=self.model,
             max_tokens=max_tokens,
             temperature=temperature,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
         )
         latency_ms = int((time.time() - start_time) * 1000)
         return ProviderResponse(
@@ -30,7 +29,7 @@ class AnthropicProvider(BaseProvider):
             tokens_in=response.usage.input_tokens,
             tokens_out=response.usage.output_tokens,
             latency_ms=latency_ms,
-            raw_response=response
+            raw_response=response,
         )
 
     async def validate_connection(self) -> bool:

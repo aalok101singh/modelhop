@@ -1,8 +1,6 @@
-from typing import Optional, List
-from .models import (
-    ModelConfig, Tier, QueryAnalysis, RoutingDecision,
-    ConfidenceResult
-)
+from typing import List, Optional
+
+from .models import ConfidenceResult, ModelConfig, QueryAnalysis, RoutingDecision, Tier
 
 
 class CascadeFallback:
@@ -33,7 +31,7 @@ class CascadeFallback:
         query: str,
         analysis: QueryAnalysis,
         failed_model: ModelConfig,
-        error: Optional[str] = None
+        error: Optional[str] = None,
     ) -> Optional[RoutingDecision]:
         next_tier = self.get_next_tier(failed_model.tier)
         if next_tier is None:
@@ -47,7 +45,7 @@ class CascadeFallback:
         return RoutingDecision(
             model=selected_model,
             tier=next_tier,
-            reason=f"Fallback from {failed_model.name} ({failed_model.tier.value}) -> {selected_model.name} ({selected_model.tier.value})"
+            reason=f"Fallback from {failed_model.name} ({failed_model.tier.value}) -> {selected_model.name} ({selected_model.tier.value})",
         )
 
     async def handle_low_confidence(
@@ -55,9 +53,11 @@ class CascadeFallback:
         query: str,
         analysis: QueryAnalysis,
         current_model: ModelConfig,
-        confidence: ConfidenceResult
+        confidence: ConfidenceResult,
     ) -> Optional[RoutingDecision]:
         return await self.handle_failure(
-            query, analysis, current_model,
-            error=f"Low confidence: {confidence.score:.2f} < {confidence.threshold}"
+            query,
+            analysis,
+            current_model,
+            error=f"Low confidence: {confidence.score:.2f} < {confidence.threshold}",
         )

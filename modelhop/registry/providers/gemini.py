@@ -1,10 +1,12 @@
 import os
 import time
 import warnings
+
 warnings.filterwarnings("ignore", category=FutureWarning)
 import google.generativeai as genai
-from .base import BaseProvider
+
 from ...core.models import ProviderResponse
+from .base import BaseProvider
 
 
 class GeminiProvider(BaseProvider):
@@ -15,18 +17,14 @@ class GeminiProvider(BaseProvider):
         self.client = genai.GenerativeModel(model)
 
     async def generate(
-        self,
-        prompt: str,
-        max_tokens: int = 2000,
-        temperature: float = 0.7
+        self, prompt: str, max_tokens: int = 2000, temperature: float = 0.7
     ) -> ProviderResponse:
         start_time = time.time()
         response = await self.client.generate_content_async(
             prompt,
             generation_config=genai.types.GenerationConfig(
-                max_output_tokens=max_tokens,
-                temperature=temperature
-            )
+                max_output_tokens=max_tokens, temperature=temperature
+            ),
         )
         latency_ms = int((time.time() - start_time) * 1000)
         return ProviderResponse(
@@ -36,7 +34,7 @@ class GeminiProvider(BaseProvider):
             tokens_in=response.usage_metadata.prompt_token_count,
             tokens_out=response.usage_metadata.candidates_token_count,
             latency_ms=latency_ms,
-            raw_response=response
+            raw_response=response,
         )
 
     async def validate_connection(self) -> bool:

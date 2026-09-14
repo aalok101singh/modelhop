@@ -1,8 +1,9 @@
-import click
 import json as json_mod
+
+import click
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 
 console = Console()
 
@@ -27,23 +28,27 @@ def list_configs(json_output: bool) -> None:
     if json_output:
         output = []
         for config in configs:
-            output.append({
-                "name": config.name,
-                "author": config.author,
-                "description": config.description,
-                "rating": config.rating,
-                "downloads": config.downloads,
-                "tags": config.tags
-            })
+            output.append(
+                {
+                    "name": config.name,
+                    "author": config.author,
+                    "description": config.description,
+                    "rating": config.rating,
+                    "downloads": config.downloads,
+                    "tags": config.tags,
+                }
+            )
         console.print(json_mod.dumps(output, indent=2))
     else:
         if not configs:
             console.print()
-            console.print(Panel(
-                "[yellow]No community configs found[/yellow]",
-                title=":frog: Community Hub",
-                border_style="cyan",
-            ))
+            console.print(
+                Panel(
+                    "[yellow]No community configs found[/yellow]",
+                    title=":frog: Community Hub",
+                    border_style="cyan",
+                )
+            )
             console.print()
             return
 
@@ -65,10 +70,14 @@ def list_configs(json_output: bool) -> None:
             table.add_row(
                 config.name,
                 config.author,
-                config.description[:40] + "..." if len(config.description) > 40 else config.description,
+                (
+                    config.description[:40] + "..."
+                    if len(config.description) > 40
+                    else config.description
+                ),
                 f":star: {config.rating:.1f}",
                 str(config.downloads),
-                ", ".join(config.tags[:3])
+                ", ".join(config.tags[:3]),
             )
 
         console.print()
@@ -88,18 +97,22 @@ def download(name: str, destination: str) -> None:
 
     if success:
         console.print()
-        console.print(Panel(
-            f"[green]:white_check_mark: Downloaded [bold]{name}[/bold] to [cyan]{destination}[/cyan][/green]",
-            title=":frog: Config Downloaded",
-            border_style="green",
-        ))
+        console.print(
+            Panel(
+                f"[green]:white_check_mark: Downloaded [bold]{name}[/bold] to [cyan]{destination}[/cyan][/green]",
+                title=":frog: Config Downloaded",
+                border_style="green",
+            )
+        )
         console.print()
     else:
         console.print()
-        console.print(Panel(
-            f"[red]:x: Config [bold]{name}[/bold] not found[/red]\n\n"
-            "Run [cyan]modelhop hub list[/cyan] to see available configs.",
-            title=":warning: Not Found",
-            border_style="red",
-        ))
+        console.print(
+            Panel(
+                f"[red]:x: Config [bold]{name}[/bold] not found[/red]\n\n"
+                "Run [cyan]modelhop hub list[/cyan] to see available configs.",
+                title=":warning: Not Found",
+                border_style="red",
+            )
+        )
         console.print()

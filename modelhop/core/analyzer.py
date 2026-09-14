@@ -1,7 +1,8 @@
 import json
 import re
-from typing import List, Optional
-from ..core.models import QueryAnalysis, ComplexityLevel, EmotionalTone
+from typing import List
+
+from ..core.models import ComplexityLevel, EmotionalTone, QueryAnalysis
 
 ANALYSIS_PROMPT = """Analyze this user query and return a JSON object with the following fields:
 
@@ -50,18 +51,12 @@ class QueryAnalyzer:
 
         prompt = ANALYSIS_PROMPT.format(query=query)
         response = None
-        last_error = None
 
         for provider in self.providers:
             try:
-                response = await provider.generate(
-                    prompt,
-                    max_tokens=200,
-                    temperature=0.1
-                )
+                response = await provider.generate(prompt, max_tokens=200, temperature=0.1)
                 break
-            except Exception as e:
-                last_error = e
+            except Exception:
                 continue
 
         if response is None:
@@ -78,7 +73,7 @@ class QueryAnalyzer:
             capabilities_needed=data.get("capabilities_needed", ["general"]),
             emotional_tone=EmotionalTone(data.get("emotional_tone", "neutral")),
             estimated_tokens=data.get("estimated_tokens", 100),
-            reasoning=data.get("reasoning", "")
+            reasoning=data.get("reasoning", ""),
         )
 
         self.cache[cache_key] = analysis
@@ -90,14 +85,38 @@ class QueryAnalyzer:
         level = ComplexityLevel.MEDIUM
         capabilities = ["general"]
 
-        coding_terms = ["code", "function", "class", "algorithm", "data structure",
-                        "debug", "implement", "write a program", "leetcode",
-                        "array", "linked list", "tree", "graph", "sort", "search"]
+        coding_terms = [
+            "code",
+            "function",
+            "class",
+            "algorithm",
+            "data structure",
+            "debug",
+            "implement",
+            "write a program",
+            "leetcode",
+            "array",
+            "linked list",
+            "tree",
+            "graph",
+            "sort",
+            "search",
+        ]
         code_count = sum(1 for term in coding_terms if term in query_lower)
 
-        algorithm_terms = ["o(n)", "o(1)", "o(log", "optimize", "efficient",
-                           "time complexity", "space complexity", "dynamic programming",
-                           "greedy", "recursion", "backtrack"]
+        algorithm_terms = [
+            "o(n)",
+            "o(1)",
+            "o(log",
+            "optimize",
+            "efficient",
+            "time complexity",
+            "space complexity",
+            "dynamic programming",
+            "greedy",
+            "recursion",
+            "backtrack",
+        ]
         algo_count = sum(1 for term in algorithm_terms if term in query_lower)
 
         if code_count >= 2 or algo_count >= 1:
@@ -118,11 +137,11 @@ class QueryAnalyzer:
             capabilities_needed=capabilities,
             emotional_tone=EmotionalTone.NEUTRAL,
             estimated_tokens=len(query.split()) * 2,
-            reasoning="Heuristic analysis (no provider available)"
+            reasoning="Heuristic analysis (no provider available)",
         )
 
     def _extract_json(self, text: str) -> dict:
-        json_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+        json_match = re.search(r"\{[^{}]*\}", text, re.DOTALL)
         if json_match:
             try:
                 return json.loads(json_match.group())
@@ -134,5 +153,5 @@ class QueryAnalyzer:
             "capabilities_needed": ["general"],
             "emotional_tone": "neutral",
             "estimated_tokens": 100,
-            "reasoning": "Failed to parse analysis, using defaults"
+            "reasoning": "Failed to parse analysis, using defaults",
         }

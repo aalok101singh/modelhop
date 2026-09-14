@@ -1,11 +1,12 @@
 import os
-from typing import List, Optional, Dict
-from ..core.models import ModelConfig, Tier
+from typing import Dict, List, Optional
+
 from ..config import Config
-from .providers.groq import GroqProvider
-from .providers.gemini import GeminiProvider
-from .providers.openai import OpenAIProvider
+from ..core.models import ModelConfig, Tier
 from .providers.base import BaseProvider
+from .providers.gemini import GeminiProvider
+from .providers.groq import GroqProvider
+from .providers.openai import OpenAIProvider
 
 PROVIDER_MAP: Dict[str, type] = {
     "groq": GroqProvider,
@@ -15,6 +16,7 @@ PROVIDER_MAP: Dict[str, type] = {
 
 try:
     from .providers.anthropic import AnthropicProvider
+
     PROVIDER_MAP["anthropic"] = AnthropicProvider
 except ImportError:
     pass
@@ -71,8 +73,7 @@ class ModelRegistry:
         if not candidates:
             candidates = self._models
         tier_order = {Tier.FREE: 0, Tier.MID: 1, Tier.PREMIUM: 2}
-        candidates.sort(key=lambda m: (
-            tier_order.get(m.tier, 3),
-            m.cost_per_1k_input + m.cost_per_1k_output
-        ))
+        candidates.sort(
+            key=lambda m: (tier_order.get(m.tier, 3), m.cost_per_1k_input + m.cost_per_1k_output)
+        )
         return candidates[0] if candidates else None
