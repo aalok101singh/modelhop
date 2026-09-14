@@ -1,28 +1,42 @@
 from .config import Config
-from .core.models import (
-    Tier, ComplexityLevel, EmotionalTone, ModelConfig,
-    QueryAnalysis, RoutingDecision, ProviderResponse,
-    ConfidenceResult, CostAnalysis, TraceEntry, HopScoreResult,
-    ShieldStatus, HubConfig, QueryFeatures, QueryType,
-    Experience, PerformanceMetrics, ModelProfile, SubQuery
-)
+from .core.adaptive_threshold import AdaptiveThreshold
 from .core.analyzer import QueryAnalyzer
-from .core.router import Router
 from .core.confidence import ConfidenceEngine
+from .core.decomposer import QueryDecomposer
 from .core.fallback import CascadeFallback
 from .core.features import FeatureExtractor
-from .core.memory import ExperienceMemory
-from .core.performance import PerformanceTracker
 from .core.learning_router import LearningRouter
-from .core.adaptive_threshold import AdaptiveThreshold
+from .core.memory import ExperienceMemory
+from .core.models import (
+    ComplexityLevel,
+    ConfidenceResult,
+    CostAnalysis,
+    EmotionalTone,
+    Experience,
+    HopScoreResult,
+    HubConfig,
+    ModelConfig,
+    ModelProfile,
+    PerformanceMetrics,
+    ProviderResponse,
+    QueryAnalysis,
+    QueryFeatures,
+    QueryType,
+    RoutingDecision,
+    ShieldStatus,
+    SubQuery,
+    Tier,
+    TraceEntry,
+)
+from .core.performance import PerformanceTracker
 from .core.reasoning import ReasoningEngine
-from .core.decomposer import QueryDecomposer
-from .registry.model_registry import ModelRegistry
-from .tracking.cost_tracker import CostTracker
-from .tracking.trace_logger import TraceLogger
-from .tracking.hop_score import HopScore
-from .shield.shield import Shield
+from .core.router import Router
 from .hub.hub import Hub
+from .registry.model_registry import ModelRegistry
+from .shield.shield import Shield
+from .tracking.cost_tracker import CostTracker
+from .tracking.hop_score import HopScore
+from .tracking.trace_logger import TraceLogger
 
 
 class ModelHop:
@@ -52,11 +66,10 @@ class ModelHop:
 
         self.confidence_engine = ConfidenceEngine(
             threshold=self.adaptive_threshold.get_threshold(),
-            enable_consensus=self.config.get_routing_config().get("cross_model_consensus", True)
+            enable_consensus=self.config.get_routing_config().get("cross_model_consensus", True),
         )
         self.fallback = CascadeFallback(
-            self.models,
-            max_retries=self.config.get_routing_config().get("max_retries", 3)
+            self.models, max_retries=self.config.get_routing_config().get("max_retries", 3)
         )
         self.cost_tracker = CostTracker()
         self.trace_logger = TraceLogger()
@@ -124,7 +137,7 @@ class ModelHop:
             response=response,
             confidence=confidence,
             cost=cost,
-            fallback_count=fallback_count
+            fallback_count=fallback_count,
         )
         self.shield.check_quality(trace)
         self.hop_score.update(confidence.is_confident)
@@ -135,15 +148,40 @@ class ModelHop:
 __all__ = [
     "ModelHop",
     "Config",
-    "Tier", "ComplexityLevel", "EmotionalTone", "ModelConfig",
-    "QueryAnalysis", "RoutingDecision", "ProviderResponse",
-    "ConfidenceResult", "CostAnalysis", "TraceEntry",
-    "HopScoreResult", "ShieldStatus", "HubConfig",
-    "QueryFeatures", "QueryType", "Experience", "PerformanceMetrics",
-    "ModelProfile", "SubQuery",
-    "QueryAnalyzer", "Router", "ConfidenceEngine", "CascadeFallback",
-    "FeatureExtractor", "ExperienceMemory", "PerformanceTracker",
-    "LearningRouter", "AdaptiveThreshold", "ReasoningEngine", "QueryDecomposer",
-    "ModelRegistry", "CostTracker", "TraceLogger", "HopScore",
-    "Shield", "Hub"
+    "Tier",
+    "ComplexityLevel",
+    "EmotionalTone",
+    "ModelConfig",
+    "QueryAnalysis",
+    "RoutingDecision",
+    "ProviderResponse",
+    "ConfidenceResult",
+    "CostAnalysis",
+    "TraceEntry",
+    "HopScoreResult",
+    "ShieldStatus",
+    "HubConfig",
+    "QueryFeatures",
+    "QueryType",
+    "Experience",
+    "PerformanceMetrics",
+    "ModelProfile",
+    "SubQuery",
+    "QueryAnalyzer",
+    "Router",
+    "ConfidenceEngine",
+    "CascadeFallback",
+    "FeatureExtractor",
+    "ExperienceMemory",
+    "PerformanceTracker",
+    "LearningRouter",
+    "AdaptiveThreshold",
+    "ReasoningEngine",
+    "QueryDecomposer",
+    "ModelRegistry",
+    "CostTracker",
+    "TraceLogger",
+    "HopScore",
+    "Shield",
+    "Hub",
 ]

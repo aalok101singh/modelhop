@@ -3,10 +3,18 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
+
 from ..core.models import (
-    TraceEntry, QueryAnalysis, RoutingDecision,
-    ProviderResponse, ConfidenceResult, CostAnalysis, ModelConfig, Tier,
-    ComplexityLevel, EmotionalTone
+    ComplexityLevel,
+    ConfidenceResult,
+    CostAnalysis,
+    EmotionalTone,
+    ModelConfig,
+    ProviderResponse,
+    QueryAnalysis,
+    RoutingDecision,
+    Tier,
+    TraceEntry,
 )
 
 
@@ -29,7 +37,15 @@ class TraceLogger:
                     timestamp=datetime.fromisoformat(entry["timestamp"]),
                     analysis=QueryAnalysis(
                         complexity=entry["complexity"],
-                        level=ComplexityLevel.SIMPLE if entry["complexity"] <= 0.3 else ComplexityLevel.MEDIUM if entry["complexity"] <= 0.6 else ComplexityLevel.COMPLEX,
+                        level=(
+                            ComplexityLevel.SIMPLE
+                            if entry["complexity"] <= 0.3
+                            else (
+                                ComplexityLevel.MEDIUM
+                                if entry["complexity"] <= 0.6
+                                else ComplexityLevel.COMPLEX
+                            )
+                        ),
                         capabilities_needed=["general"],
                         emotional_tone=EmotionalTone.NEUTRAL,
                     ),
@@ -41,7 +57,7 @@ class TraceLogger:
                             tier=Tier(entry["tier"]),
                         ),
                         tier=Tier(entry["tier"]),
-                        reason=""
+                        reason="",
                     ),
                     response=ProviderResponse(
                         content="",
@@ -77,7 +93,7 @@ class TraceLogger:
         confidence: ConfidenceResult,
         cost: CostAnalysis,
         fallback_used: bool = False,
-        fallback_count: int = 0
+        fallback_count: int = 0,
     ) -> TraceEntry:
         trace = TraceEntry(
             query_id=str(uuid.uuid4())[:8],
@@ -90,7 +106,7 @@ class TraceLogger:
             cost=cost,
             fallback_used=fallback_used,
             fallback_count=fallback_count,
-            total_latency_ms=response.latency_ms
+            total_latency_ms=response.latency_ms,
         )
 
         self.history.append(trace)
@@ -105,19 +121,21 @@ class TraceLogger:
             else:
                 log = {"traces": []}
 
-            log["traces"].append({
-                "query_id": trace.query_id,
-                "query": trace.query,
-                "timestamp": trace.timestamp.isoformat(),
-                "complexity": trace.analysis.complexity,
-                "model": trace.decision.model.name,
-                "tier": trace.decision.tier.value,
-                "confidence": trace.confidence.score,
-                "actual_cost": trace.cost.actual_cost,
-                "savings": trace.cost.savings,
-                "latency_ms": trace.total_latency_ms,
-                "fallback_used": trace.fallback_used
-            })
+            log["traces"].append(
+                {
+                    "query_id": trace.query_id,
+                    "query": trace.query,
+                    "timestamp": trace.timestamp.isoformat(),
+                    "complexity": trace.analysis.complexity,
+                    "model": trace.decision.model.name,
+                    "tier": trace.decision.tier.value,
+                    "confidence": trace.confidence.score,
+                    "actual_cost": trace.cost.actual_cost,
+                    "savings": trace.cost.savings,
+                    "latency_ms": trace.total_latency_ms,
+                    "fallback_used": trace.fallback_used,
+                }
+            )
 
             with open(self.log_path, "w") as f:
                 json.dump(log, f, indent=2)
@@ -134,7 +152,7 @@ class TraceLogger:
                 "avg_complexity": 0,
                 "avg_confidence": 0,
                 "avg_latency_ms": 0,
-                "fallback_rate": 0
+                "fallback_rate": 0,
             }
 
         return {
@@ -142,5 +160,7 @@ class TraceLogger:
             "avg_complexity": sum(t.analysis.complexity for t in self.history) / len(self.history),
             "avg_confidence": sum(t.confidence.score for t in self.history) / len(self.history),
             "avg_latency_ms": sum(t.total_latency_ms for t in self.history) / len(self.history),
-            "fallback_rate": sum(1 for t in self.history if t.fallback_used) / len(self.history) * 100
+            "fallback_rate": sum(1 for t in self.history if t.fallback_used)
+            / len(self.history)
+            * 100,
         }

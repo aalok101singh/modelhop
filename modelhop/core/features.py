@@ -1,76 +1,373 @@
-import re
 import math
-from typing import List, Dict, Set, Tuple
+import re
+from typing import Dict, List, Set
+
 from .models import QueryFeatures, QueryType
 
 CODE_KEYWORDS: Set[str] = {
-    "function", "class", "method", "implement", "write", "code", "program",
-    "algorithm", "array", "list", "dictionary", "hash", "stack", "queue",
-    "tree", "graph", "node", "loop", "recursion", "iterate", "sort", "search",
-    "binary", "traverse", "insert", "delete", "update", "return", "variable",
-    "compile", "runtime", "debug", "syntax", "int", "string", "boolean",
-    "float", "void", "null", "true", "false", "if", "else", "for", "while",
-    "switch", "case", "break", "continue", "try", "catch", "throw", "import",
-    "export", "module", "package", "struct", "enum", "interface", "type",
-    "async", "await", "promise", "callback", "closure", "lambda", "def",
-    "print", "input", "read", "open", "close", "file", "stream",
-    "duplicate", "element", "index", "value", "pointer", "reference",
-    "iterate", "traverse", "recursive", "iterative", "inplace", "in-place",
-    "subarray", "subsequence", "substring", "permutation", "combination",
-    "fibonacci", "factorial", "palindrome", "anagram", "bracket",
+    "function",
+    "class",
+    "method",
+    "implement",
+    "write",
+    "code",
+    "program",
+    "algorithm",
+    "array",
+    "list",
+    "dictionary",
+    "hash",
+    "stack",
+    "queue",
+    "tree",
+    "graph",
+    "node",
+    "loop",
+    "recursion",
+    "iterate",
+    "sort",
+    "search",
+    "binary",
+    "traverse",
+    "insert",
+    "delete",
+    "update",
+    "return",
+    "variable",
+    "compile",
+    "runtime",
+    "debug",
+    "syntax",
+    "int",
+    "string",
+    "boolean",
+    "float",
+    "void",
+    "null",
+    "true",
+    "false",
+    "if",
+    "else",
+    "for",
+    "while",
+    "switch",
+    "case",
+    "break",
+    "continue",
+    "try",
+    "catch",
+    "throw",
+    "import",
+    "export",
+    "module",
+    "package",
+    "struct",
+    "enum",
+    "interface",
+    "type",
+    "async",
+    "await",
+    "promise",
+    "callback",
+    "closure",
+    "lambda",
+    "def",
+    "print",
+    "input",
+    "read",
+    "open",
+    "close",
+    "file",
+    "stream",
+    "duplicate",
+    "element",
+    "index",
+    "value",
+    "pointer",
+    "reference",
+    "iterate",
+    "traverse",
+    "recursive",
+    "iterative",
+    "inplace",
+    "in-place",
+    "subarray",
+    "subsequence",
+    "substring",
+    "permutation",
+    "combination",
+    "fibonacci",
+    "factorial",
+    "palindrome",
+    "anagram",
+    "bracket",
 }
 
 ALGORITHM_KEYWORDS: Set[str] = {
-    "sort", "search", "merge", "quick", "heap", "bubble", "insertion",
-    "selection", "linear", "binary", "bfs", "dfs", "dijkstra", "bellman",
-    "floyd", "warshall", "kruskal", "prim", "huffman", "knapsack",
-    "dynamic", "programming", "recursion", "memoization", "backtracking",
-    "greedy", "divide", "conquer", "sliding", "window", "two", "pointer",
-    "fast", "slow", "pointer", "cycle", "detect", "linked", "list",
-    "binary", "search", "tree", "bst", "avl", "red", "black", "trie",
-    "hash", "map", "set", "heap", "priority", "queue", "stack", "deque",
-    "graph", "vertex", "edge", "adjacency", "matrix", "list", "directed",
-    "undirected", "weighted", "shortest", "path", "minimum", "spanning",
-    "tree", "topological", "sort", "strongly", "connected", "component",
+    "sort",
+    "search",
+    "merge",
+    "quick",
+    "heap",
+    "bubble",
+    "insertion",
+    "selection",
+    "linear",
+    "binary",
+    "bfs",
+    "dfs",
+    "dijkstra",
+    "bellman",
+    "floyd",
+    "warshall",
+    "kruskal",
+    "prim",
+    "huffman",
+    "knapsack",
+    "dynamic",
+    "programming",
+    "recursion",
+    "memoization",
+    "backtracking",
+    "greedy",
+    "divide",
+    "conquer",
+    "sliding",
+    "window",
+    "two",
+    "pointer",
+    "fast",
+    "slow",
+    "pointer",
+    "cycle",
+    "detect",
+    "linked",
+    "list",
+    "binary",
+    "search",
+    "tree",
+    "bst",
+    "avl",
+    "red",
+    "black",
+    "trie",
+    "hash",
+    "map",
+    "set",
+    "heap",
+    "priority",
+    "queue",
+    "stack",
+    "deque",
+    "graph",
+    "vertex",
+    "edge",
+    "adjacency",
+    "matrix",
+    "list",
+    "directed",
+    "undirected",
+    "weighted",
+    "shortest",
+    "path",
+    "minimum",
+    "spanning",
+    "tree",
+    "topological",
+    "sort",
+    "strongly",
+    "connected",
+    "component",
 }
 
 COMPLEXITY_KEYWORDS: Set[str] = {
-    "optimize", "efficient", "scalable", "performance", "latency", "throughput",
-    "complexity", "time", "space", "o(n)", "o(1)", "o(log", "o(n^2)",
-    "amortized", "worst", "case", "best", "average", "in", "place",
-    "without", "extra", "space", "constant", "loglinear", "quadratic",
-    "exponential", "polynomial", "linear", "sublinear", "parallel",
-    "concurrent", "distributed", "cache", "memory", "disk", "network",
-    "io", "bottleneck", "tradeoff", "trade", "off", "balance",
+    "optimize",
+    "efficient",
+    "scalable",
+    "performance",
+    "latency",
+    "throughput",
+    "complexity",
+    "time",
+    "space",
+    "o(n)",
+    "o(1)",
+    "o(log",
+    "o(n^2)",
+    "amortized",
+    "worst",
+    "case",
+    "best",
+    "average",
+    "in",
+    "place",
+    "without",
+    "extra",
+    "space",
+    "constant",
+    "loglinear",
+    "quadratic",
+    "exponential",
+    "polynomial",
+    "linear",
+    "sublinear",
+    "parallel",
+    "concurrent",
+    "distributed",
+    "cache",
+    "memory",
+    "disk",
+    "network",
+    "io",
+    "bottleneck",
+    "tradeoff",
+    "trade",
+    "off",
+    "balance",
 }
 
 TECHNICAL_TERMS: Set[str] = {
-    "api", "sdk", "database", "sql", "nosql", "redis", "mysql", "postgres",
-    "mongodb", "server", "client", "http", "https", "tcp", "udp", "ip",
-    "dns", "ssl", "tls", "encryption", "authentication", "authorization",
-    "oauth", "jwt", "token", "session", "cookie", "cache", "proxy",
-    "load", "balancer", "nginx", "apache", "docker", "kubernetes", "aws",
-    "azure", "gcp", "cloud", "microservice", "monolith", "rest", "graphql",
-    "grpc", "websocket", "queue", "pub", "sub", "message", "broker",
-    "kafka", "rabbitmq", "elasticsearch", "kibana", "monitoring",
-    "logging", "metrics", "tracing", "ci", "cd", "pipeline", "git",
-    "repository", "branch", "merge", "commit", "pull", "request",
+    "api",
+    "sdk",
+    "database",
+    "sql",
+    "nosql",
+    "redis",
+    "mysql",
+    "postgres",
+    "mongodb",
+    "server",
+    "client",
+    "http",
+    "https",
+    "tcp",
+    "udp",
+    "ip",
+    "dns",
+    "ssl",
+    "tls",
+    "encryption",
+    "authentication",
+    "authorization",
+    "oauth",
+    "jwt",
+    "token",
+    "session",
+    "cookie",
+    "cache",
+    "proxy",
+    "load",
+    "balancer",
+    "nginx",
+    "apache",
+    "docker",
+    "kubernetes",
+    "aws",
+    "azure",
+    "gcp",
+    "cloud",
+    "microservice",
+    "monolith",
+    "rest",
+    "graphql",
+    "grpc",
+    "websocket",
+    "queue",
+    "pub",
+    "sub",
+    "message",
+    "broker",
+    "kafka",
+    "rabbitmq",
+    "elasticsearch",
+    "kibana",
+    "monitoring",
+    "logging",
+    "metrics",
+    "tracing",
+    "ci",
+    "cd",
+    "pipeline",
+    "git",
+    "repository",
+    "branch",
+    "merge",
+    "commit",
+    "pull",
+    "request",
 }
 
 DEBUG_KEYWORDS: Set[str] = {
-    "fix", "error", "bug", "broken", "not", "working", "fails", "crash",
-    "exception", "traceback", "stack", "overflow", "null", "pointer",
-    "undefined", "reference", "type", "mismatch", "segfault", "deadlock",
-    "race", "condition", "memory", "leak", "infinite", "loop", "hang",
-    "timeout", "disconnect", "refused", "invalid", "unexpected",
+    "fix",
+    "error",
+    "bug",
+    "broken",
+    "not",
+    "working",
+    "fails",
+    "crash",
+    "exception",
+    "traceback",
+    "stack",
+    "overflow",
+    "null",
+    "pointer",
+    "undefined",
+    "reference",
+    "type",
+    "mismatch",
+    "segfault",
+    "deadlock",
+    "race",
+    "condition",
+    "memory",
+    "leak",
+    "infinite",
+    "loop",
+    "hang",
+    "timeout",
+    "disconnect",
+    "refused",
+    "invalid",
+    "unexpected",
 }
 
 CREATIVE_KEYWORDS: Set[str] = {
-    "write", "story", "poem", "creative", "brainstorm", "idea", "imagine",
-    "fiction", "narrative", "character", "plot", "dialogue", "essay",
-    "article", "blog", "content", "copy", "marketing", "slogan", "tagline",
-    "name", "brand", "design", "logo", "visual", "art", "draw", "paint",
-    "compose", "music", "song", "lyric", "script", "screenplay", "novel",
+    "write",
+    "story",
+    "poem",
+    "creative",
+    "brainstorm",
+    "idea",
+    "imagine",
+    "fiction",
+    "narrative",
+    "character",
+    "plot",
+    "dialogue",
+    "essay",
+    "article",
+    "blog",
+    "content",
+    "copy",
+    "marketing",
+    "slogan",
+    "tagline",
+    "name",
+    "brand",
+    "design",
+    "logo",
+    "visual",
+    "art",
+    "draw",
+    "paint",
+    "compose",
+    "music",
+    "song",
+    "lyric",
+    "script",
+    "screenplay",
+    "novel",
 }
 
 
@@ -79,18 +376,16 @@ class FeatureExtractor:
 
     def __init__(self):
         self._code_pattern = re.compile(
-            r'(?:def|class|function|import|from|return|if|else|for|while|'
-            r'\{| \}|\[|\]|=>|->|\#\s*include|public|private|static)',
-            re.IGNORECASE
+            r"(?:def|class|function|import|from|return|if|else|for|while|"
+            r"\{| \}|\[|\]|=>|->|\#\s*include|public|private|static)",
+            re.IGNORECASE,
         )
         self._constraint_pattern = re.compile(
-            r'O\(\s*[n1]\s*\)|in[\s-]place|without\s+(?:extra|additional)\s+space|'
-            r'constant\s+space|linear\s+time|in[\s-]situ',
-            re.IGNORECASE
+            r"O\(\s*[n1]\s*\)|in[\s-]place|without\s+(?:extra|additional)\s+space|"
+            r"constant\s+space|linear\s+time|in[\s-]situ",
+            re.IGNORECASE,
         )
-        self._complexity_notation = re.compile(
-            r'O\([^)]+\)', re.IGNORECASE
-        )
+        self._complexity_notation = re.compile(r"O\([^)]+\)", re.IGNORECASE)
 
     def extract(self, query: str) -> QueryFeatures:
         query_lower = query.lower()
@@ -126,9 +421,7 @@ class FeatureExtractor:
 
         query_type = self._classify_query_type(intent, lexical, complexity_signals)
 
-        feature_vector = self._build_feature_vector(
-            structural, lexical, intent, complexity_signals
-        )
+        feature_vector = self._build_feature_vector(structural, lexical, intent, complexity_signals)
 
         return QueryFeatures(
             length=structural["length"],
@@ -176,11 +469,21 @@ class FeatureExtractor:
 
         algo_bigram_boost = 0
         algo_bigrams = {
-            "dynamic programming", "binary search", "search tree",
-            "linked list", "hash map", "priority queue", "depth first",
-            "breadth first", "shortest path", "spanning tree",
-            "two pointer", "sliding window", "divide and",
-            "back tracking", "topological sort",
+            "dynamic programming",
+            "binary search",
+            "search tree",
+            "linked list",
+            "hash map",
+            "priority queue",
+            "depth first",
+            "breadth first",
+            "shortest path",
+            "spanning tree",
+            "two pointer",
+            "sliding window",
+            "divide and",
+            "back tracking",
+            "topological sort",
         }
         algo_bigram_boost = len(bigrams & algo_bigrams)
 
@@ -194,20 +497,47 @@ class FeatureExtractor:
         impl_signals = {"implement", "create", "build", "code", "develop", "program"}
         explain_signals = {"explain", "what", "how", "why", "describe", "define", "describe"}
         debug_signals = {"fix", "debug", "error", "bug", "broken", "not working", "fails", "crash"}
-        compare_signals = {"compare", "vs", "versus", "difference", "differences", "better", "worse"}
-        creative_signals = {"story", "poem", "creative", "brainstorm", "compose", "narrative", "fiction", "essay", "blog"}
+        compare_signals = {
+            "compare",
+            "vs",
+            "versus",
+            "difference",
+            "differences",
+            "better",
+            "worse",
+        }
+        creative_signals = {
+            "story",
+            "poem",
+            "creative",
+            "brainstorm",
+            "compose",
+            "narrative",
+            "fiction",
+            "essay",
+            "blog",
+        }
 
-        is_creative = bool(word_set & creative_signals) or bool(re.search(
-            r'\b(?:write|create|compose)\b\s+(?:a|an|the)\s+(?:story|poem|essay|blog|article|narrative|song)',
-            query_lower
-        ))
+        is_creative = bool(word_set & creative_signals) or bool(
+            re.search(
+                r"\b(?:write|create|compose)\b\s+(?:a|an|the)\s+(?:story|poem|essay|blog|article|narrative|song)",
+                query_lower,
+            )
+        )
 
-        is_impl = (bool(word_set & impl_signals) or bool(re.search(
-            r'\b(?:write|implement|create|build|code)\b\s+(?:a|an|the)\s+(?:function|class|method|program|algorithm|solution|implementation)',
-            query_lower
-        ))) and not is_creative
+        is_impl = (
+            bool(word_set & impl_signals)
+            or bool(
+                re.search(
+                    r"\b(?:write|implement|create|build|code)\b\s+(?:a|an|the)\s+(?:function|class|method|program|algorithm|solution|implementation)",
+                    query_lower,
+                )
+            )
+        ) and not is_creative
 
-        is_explain = bool(word_set & explain_signals) or query_lower.startswith(("what", "how", "why"))
+        is_explain = bool(word_set & explain_signals) or query_lower.startswith(
+            ("what", "how", "why")
+        )
         is_debug = bool(word_set & debug_signals)
         is_compare = bool(word_set & compare_signals) and not is_explain
 
@@ -228,8 +558,16 @@ class FeatureExtractor:
         requires_optimization = bool(word_set & optimization_signals) or has_complexity_notation
 
         multi_step_signals = {
-            "first", "then", "next", "finally", "step", "steps",
-            "process", "workflow", "pipeline", "chain",
+            "first",
+            "then",
+            "next",
+            "finally",
+            "step",
+            "steps",
+            "process",
+            "workflow",
+            "pipeline",
+            "chain",
         }
         multi_step = len(word_set & multi_step_signals) >= 2
 
@@ -240,9 +578,7 @@ class FeatureExtractor:
             "multi_step": multi_step,
         }
 
-    def _classify_query_type(
-        self, intent: Dict, lexical: Dict, complexity: Dict
-    ) -> QueryType:
+    def _classify_query_type(self, intent: Dict, lexical: Dict, complexity: Dict) -> QueryType:
         if intent["is_implementation"] or lexical["code_keyword_count"] >= 2:
             return QueryType.IMPLEMENTATION
         if intent["is_debugging"]:

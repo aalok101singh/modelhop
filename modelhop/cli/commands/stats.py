@@ -1,8 +1,9 @@
-import click
 import json as json_mod
+
+import click
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 
 console = Console()
 
@@ -19,22 +20,20 @@ def stats(json_output: bool) -> None:
     hop_stats = mh.hop_score.get_stats()
 
     if json_output:
-        output = {
-            "cost": cost_summary,
-            "traces": trace_stats,
-            "hop_score": hop_stats
-        }
+        output = {"cost": cost_summary, "traces": trace_stats, "hop_score": hop_stats}
         console.print(json_mod.dumps(output, indent=2))
     else:
         console.print()
 
         if cost_summary["query_count"] == 0:
-            console.print(Panel(
-                "[yellow]No queries routed yet.[/yellow]\n\n"
-                "Run [cyan]modelhop route \"your query\"[/cyan] to get started!",
-                title=":frog: ModelHop Statistics",
-                border_style="cyan",
-            ))
+            console.print(
+                Panel(
+                    "[yellow]No queries routed yet.[/yellow]\n\n"
+                    'Run [cyan]modelhop route "your query"[/cyan] to get started!',
+                    title=":frog: ModelHop Statistics",
+                    border_style="cyan",
+                )
+            )
             console.print()
             return
 
@@ -51,12 +50,16 @@ def stats(json_output: bool) -> None:
         table.add_row(":bar_chart: Total Queries", str(cost_summary["query_count"]))
         table.add_row(":moneybag: Total Cost", f"${cost_summary['total_cost']:.4f}")
         table.add_row(":sparkles: Total Savings", f"${cost_summary['total_savings']:.4f}")
-        table.add_row(":chart_with_upwards_trend: Savings %", f"{cost_summary['savings_percentage']:.1f}%")
+        table.add_row(
+            ":chart_with_upwards_trend: Savings %", f"{cost_summary['savings_percentage']:.1f}%"
+        )
         table.add_row(":trophy: Hop Score", f"{hop_stats['score']}/100 ({hop_stats['rating']})")
         table.add_row(":brain: Avg Complexity", f"{trace_stats['avg_complexity']:.2f}")
         table.add_row(":mag: Avg Confidence", f"{trace_stats['avg_confidence']:.2f}")
         table.add_row(":zap: Avg Latency", f"{trace_stats['avg_latency_ms']:.0f}ms")
-        table.add_row(":arrows_counterclockwise: Fallback Rate", f"{trace_stats['fallback_rate']:.1f}%")
+        table.add_row(
+            ":arrows_counterclockwise: Fallback Rate", f"{trace_stats['fallback_rate']:.1f}%"
+        )
 
         console.print(table)
         console.print()

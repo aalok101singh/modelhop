@@ -1,12 +1,17 @@
-from typing import List, Optional, Dict, Tuple
 from collections import defaultdict
-from .models import (
-    QueryAnalysis, RoutingDecision, ModelConfig, QueryFeatures,
-    QueryType, Tier, ComplexityLevel, Experience
-)
-from .memory import ExperienceMemory
-from .performance import PerformanceTracker
+from typing import Dict, List, Optional, Tuple
+
 from .features import FeatureExtractor
+from .memory import ExperienceMemory
+from .models import (
+    ComplexityLevel,
+    ModelConfig,
+    QueryAnalysis,
+    QueryFeatures,
+    RoutingDecision,
+    Tier,
+)
+from .performance import PerformanceTracker
 
 MIN_EXPERIENCES_FOR_LEARNING = 3
 ESCALATION_QUALITY_THRESHOLD = 0.65
@@ -54,9 +59,7 @@ class LearningRouter:
         if experience_decision is not None:
             return experience_decision, " | ".join(reasoning_parts)
 
-        capability_decision = self._capability_aware_route(
-            enhanced_analysis, reasoning_parts
-        )
+        capability_decision = self._capability_aware_route(enhanced_analysis, reasoning_parts)
         if capability_decision is not None:
             return capability_decision, " | ".join(reasoning_parts)
 
@@ -87,7 +90,9 @@ class LearningRouter:
 
         if signal_capabilities - set(analysis.capabilities_needed):
             new_caps = signal_capabilities - set(analysis.capabilities_needed)
-            reasoning_parts.append(f"Signals detected additional capabilities: {', '.join(new_caps)}")
+            reasoning_parts.append(
+                f"Signals detected additional capabilities: {', '.join(new_caps)}"
+            )
 
         return QueryAnalysis(
             complexity=merged_complexity,
@@ -194,14 +199,16 @@ class LearningRouter:
             confidence = min(1.0, sample_count / 8)
             adjusted_quality = avg_quality * (1.0 - fallback_rate * 0.3)
 
-            ranked.append({
-                "model": model_name,
-                "quality": avg_quality,
-                "adjusted_quality": adjusted_quality,
-                "samples": sample_count,
-                "fallback_rate": fallback_rate,
-                "confidence": confidence,
-            })
+            ranked.append(
+                {
+                    "model": model_name,
+                    "quality": avg_quality,
+                    "adjusted_quality": adjusted_quality,
+                    "samples": sample_count,
+                    "fallback_rate": fallback_rate,
+                    "confidence": confidence,
+                }
+            )
 
         ranked.sort(key=lambda x: -x["adjusted_quality"])
 
@@ -231,14 +238,12 @@ class LearningRouter:
                 )
                 model = premium_available[0]
                 alternatives = [
-                    self._model_map[r["model"]]
-                    for r in ranked[:2]
-                    if r["model"] in self._model_map
+                    self._model_map[r["model"]] for r in ranked[:2] if r["model"] in self._model_map
                 ]
                 return RoutingDecision(
                     model=model,
                     tier=model.tier,
-                    reason=f"Complex query: trying premium for quality comparison",
+                    reason="Complex query: trying premium for quality comparison",
                     alternatives=alternatives,
                 )
 
@@ -250,9 +255,7 @@ class LearningRouter:
                     for r in ranked[1:3]
                     if r["model"] in self._model_map
                 ]
-                reasoning_parts.append(
-                    f"Selected {model.name} based on historical performance"
-                )
+                reasoning_parts.append(f"Selected {model.name} based on historical performance")
                 return RoutingDecision(
                     model=model,
                     tier=model.tier,
@@ -272,15 +275,11 @@ class LearningRouter:
         if not needs_advanced:
             return None
 
-        capable_models = [
-            m for m in self.models
-            if all(c in m.capabilities for c in required)
-        ]
+        capable_models = [m for m in self.models if all(c in m.capabilities for c in required)]
 
         if not capable_models:
             capable_models = [
-                m for m in self.models
-                if any(c in m.capabilities for c in required & premium_caps)
+                m for m in self.models if any(c in m.capabilities for c in required & premium_caps)
             ]
 
         if not capable_models:
@@ -291,9 +290,7 @@ class LearningRouter:
         if premium_capable and analysis.complexity >= CAPABILITY_ROUTING_THRESHOLD:
             model = premium_capable[0]
             alternatives = [m for m in capable_models if m.name != model.name][:2]
-            reasoning_parts.append(
-                f"Requires {', '.join(required & premium_caps)} -> premium tier"
-            )
+            reasoning_parts.append(f"Requires {', '.join(required & premium_caps)} -> premium tier")
             return RoutingDecision(
                 model=model,
                 tier=model.tier,

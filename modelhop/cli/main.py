@@ -1,7 +1,7 @@
+from importlib.metadata import version as get_version
+
 import click
 from rich.console import Console
-from importlib.metadata import version as get_version
-from pathlib import Path
 
 console = Console(force_terminal=True)
 
@@ -20,19 +20,19 @@ def cli(ctx) -> None:
         ctx.invoke(welcome)
 
 
-from .commands.route import route
-from .commands.init import init
 from .commands.benchmark import benchmark
-from .commands.config import config
-from .commands.stats import stats
-from .commands.history import history
-from .commands.providers_cmd import providers
-from .commands.shield_cmd import shield
-from .commands.hub_cmd import hub
-from .commands.welcome import welcome
-from .commands.example import example
 from .commands.cheat import cheat
+from .commands.config import config
+from .commands.example import example
+from .commands.history import history
+from .commands.hub_cmd import hub
+from .commands.init import init
+from .commands.providers_cmd import providers
+from .commands.route import route
 from .commands.setup import setup
+from .commands.shield_cmd import shield
+from .commands.stats import stats
+from .commands.welcome import welcome
 
 cli.add_command(route)
 cli.add_command(init)
@@ -46,6 +46,7 @@ cli.add_command(hub)
 cli.add_command(welcome)
 cli.add_command(example)
 cli.add_command(setup)
+cli.add_command(cheat)
 
 # Short aliases
 cli.add_command(route, "r")

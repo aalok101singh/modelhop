@@ -1,9 +1,9 @@
-import click
 import asyncio
 import json as json_mod
+
+import click
 from rich.console import Console
 from rich.table import Table
-from rich.panel import Panel
 
 console = Console()
 
@@ -33,13 +33,15 @@ def providers(json_output: bool) -> None:
                 status = "connected" if connected else "failed"
             else:
                 status = "no_key"
-            output.append({
-                "name": model.name,
-                "provider": model.provider,
-                "model": model.model,
-                "tier": model.tier.value,
-                "status": status
-            })
+            output.append(
+                {
+                    "name": model.name,
+                    "provider": model.provider,
+                    "model": model.model,
+                    "tier": model.tier.value,
+                    "status": status,
+                }
+            )
         console.print(json_mod.dumps(output, indent=2))
     else:
         table = Table(
@@ -68,10 +70,7 @@ def providers(json_output: bool) -> None:
             else:
                 status = "[yellow]:key: No API Key[/yellow]"
             table.add_row(
-                model.provider,
-                model.model,
-                f"[{color}]{model.tier.value}[/{color}]",
-                status
+                model.provider, model.model, f"[{color}]{model.tier.value}[/{color}]", status
             )
 
         console.print()

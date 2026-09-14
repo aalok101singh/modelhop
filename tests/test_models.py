@@ -1,71 +1,108 @@
 """Tests for data models."""
 import pytest
-from modelhop.core.models import HopResult, RouteResult, QueryFeatures
+from modelhop.core.models import (
+    HopScoreResult,
+    RoutingDecision,
+    QueryFeatures,
+    QueryAnalysis,
+    ModelConfig,
+    ProviderResponse,
+    ConfidenceResult,
+    CostAnalysis,
+    Tier,
+    ComplexityLevel,
+    QueryType,
+)
 
 
-class TestHopResult:
-    """Tests for HopResult model."""
+class TestHopScoreResult:
+    """Tests for HopScoreResult model."""
 
-    def test_hop_result_creation(self):
-        result = HopResult(
-            query="test query",
-            model="qwen/qwen3.8-27b",
+    def test_creation(self):
+        result = HopScoreResult(
+            score=85,
+            total_queries=10,
+            optimal_routes=8,
+            rating="Great",
+        )
+        assert result.score == 85
+        assert result.total_queries == 10
+        assert result.optimal_routes == 8
+        assert result.rating == "Great"
+
+    def test_defaults(self):
+        result = HopScoreResult(score=0, total_queries=0, optimal_routes=0, rating="N/A")
+        assert result.score == 0
+        assert result.total_queries == 0
+
+
+class TestRoutingDecision:
+    """Tests for RoutingDecision model."""
+
+    def test_creation(self):
+        model = ModelConfig(
+            name="test-model",
             provider="groq",
-            response="test response",
-            cost=0.0,
-            latency_ms=100.0,
-            hop_score=0.85,
-        )
-        assert result.query == "test query"
-        assert result.model == "qwen/qwen3.8-27b"
-        assert result.provider == "groq"
-        assert result.response == "test response"
-        assert result.cost == 0.0
-        assert result.latency_ms == 100.0
-        assert result.hop_score == 0.85
-
-    def test_hop_result_defaults(self):
-        result = HopResult(
-            query="test",
-            model="model",
-            provider="provider",
-            response="response",
-        )
-        assert result.cost == 0.0
-        assert result.latency_ms == 0.0
-        assert result.hop_score == 0.0
-
-
-class TestRouteResult:
-    """Tests for RouteResult model."""
-
-    def test_route_result_creation(self):
-        result = RouteResult(
             model="qwen/qwen3.8-27b",
-            provider="groq",
-            tier="free",
-            confidence=0.9,
-            reasoning="Test query best suited for free tier",
+            tier=Tier.FREE,
         )
-        assert result.model == "qwen/qwen3.8-27b"
-        assert result.provider == "groq"
-        assert result.tier == "free"
-        assert result.confidence == 0.9
+        decision = RoutingDecision(
+            model=model,
+            tier=Tier.FREE,
+            reason="Simple query",
+        )
+        assert decision.model.name == "test-model"
+        assert decision.tier == Tier.FREE
+        assert decision.reason == "Simple query"
 
 
 class TestQueryFeatures:
     """Tests for QueryFeatures model."""
 
-    def test_query_features_creation(self):
+    def test_creation(self):
         features = QueryFeatures(
-            complexity=0.5,
-            requires_code=False,
-            requires_reasoning=True,
-            language="en",
-            domain="general",
-            word_count=5,
-            char_count=25,
+            length=25,
+            has_question=True,
+            technical_term_ratio=0.3,
+            query_type=QueryType.GENERAL,
         )
-        assert features.complexity == 0.5
-        assert features.requires_code is False
-        assert features.requires_reasoning is True
+        assert features.length == 25
+        assert features.has_question is True
+        assert features.technical_term_ratio == 0.3
+
+    def test_defaults(self):
+        features = QueryFeatures()
+        assert features.length == 0
+        assert features.has_code_block is False
+        assert features.query_type == QueryType.GENERAL
+
+
+class TestQueryAnalysis:
+    """Tests for QueryAnalysis model."""
+
+    def test_creation(self):
+        analysis = QueryAnalysis(
+            complexity=0.5,
+            level=ComplexityLevel.MEDIUM,
+            capabilities_needed=["reasoning"],
+        )
+        assert analysis.complexity == 0.5
+        assert analysis.level == ComplexityLevel.MEDIUM
+        assert "reasoning" in analysis.capabilities_needed
+
+
+class TestModelConfig:
+    """Tests for ModelConfig model."""
+
+    def test_creation(self):
+        config = ModelConfig(
+            name="groq-model",
+            provider="groq",
+            model="qwen/qwen3.8-27b",
+            tier=Tier.FREE,
+            cost_per_1k_input=0.0,
+            cost_per_1k_output=0.0,
+        )
+        assert config.name == "groq-model"
+        assert config.tier == Tier.FREE
+        assert config.cost_per_1k_input == 0.0

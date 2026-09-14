@@ -1,7 +1,8 @@
 import json
 import re
 from typing import Optional
-from .models import ConfidenceResult, ProviderResponse, QueryFeatures, QueryType
+
+from .models import ConfidenceResult, ProviderResponse, QueryFeatures
 
 CONFIDENCE_PROMPT = """Rate your confidence in this response on a scale of 0.0 to 1.0.
 
@@ -78,7 +79,7 @@ class ConfidenceEngine:
             threshold=self.threshold,
             consensus_model=consensus_model,
             consensus_score=consensus_score,
-            reasoning=reasoning
+            reasoning=reasoning,
         )
 
     def _heuristic_confidence(
@@ -120,9 +121,7 @@ class ConfidenceEngine:
 
         return max(0.3, min(0.95, score))
 
-    async def _get_model_confidence(
-        self, query: str, response: str, provider=None
-    ) -> float:
+    async def _get_model_confidence(self, query: str, response: str, provider=None) -> float:
         if provider is None:
             return 0.85
 
@@ -135,19 +134,16 @@ class ConfidenceEngine:
             return 0.85
 
     async def _check_consensus(
-        self,
-        query: str,
-        response: ProviderResponse,
-        consensus_provider
+        self, query: str, response: ProviderResponse, consensus_provider
     ) -> tuple:
         try:
             consensus_response = await consensus_provider.generate(query, max_tokens=500)
             prompt = CONSENSUS_PROMPT.format(
-                query=query,
-                response_a=response.content,
-                response_b=consensus_response.content
+                query=query, response_a=response.content, response_b=consensus_response.content
             )
-            judge_result = await consensus_provider.generate(prompt, max_tokens=100, temperature=0.1)
+            judge_result = await consensus_provider.generate(
+                prompt, max_tokens=100, temperature=0.1
+            )
             data = self._extract_json(judge_result.content)
             similarity = data.get("similarity", 0.88)
             return similarity, consensus_response.model_used
@@ -155,7 +151,7 @@ class ConfidenceEngine:
             return 0.88, None
 
     def _extract_json(self, text: str) -> dict:
-        json_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+        json_match = re.search(r"\{[^{}]*\}", text, re.DOTALL)
         if json_match:
             try:
                 return json.loads(json_match.group())

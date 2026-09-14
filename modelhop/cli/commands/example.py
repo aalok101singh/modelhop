@@ -9,12 +9,14 @@ console = Console(force_terminal=True)
 def example() -> None:
     """:frog: Show example queries to try."""
     console.print()
-    console.print(Panel(
-        "[bold green]:frog: Example Queries[/bold green]\n"
-        "[dim]Copy-paste these to see ModelHop in action![/dim]",
-        border_style="green",
-        padding=(0, 2),
-    ))
+    console.print(
+        Panel(
+            "[bold green]:frog: Example Queries[/bold green]\n"
+            "[dim]Copy-paste these to see ModelHop in action![/dim]",
+            border_style="green",
+            padding=(0, 2),
+        )
+    )
     console.print()
 
     examples = [
@@ -51,21 +53,25 @@ def example() -> None:
     ]
 
     for i, ex in enumerate(examples, 1):
-        console.print(Panel(
-            f"[bold cyan]\"{ex['query']}\"[/bold cyan]\n\n"
-            f"  Tier: [{ex['color']}]{ex['tier']}[/{ex['color']}]  |  Why: [dim]{ex['why']}[/dim]",
-            title=f":speech_balloon: Example {i}",
-            border_style=ex["color"],
-            padding=(0, 1),
-        ))
+        console.print(
+            Panel(
+                f"[bold cyan]\"{ex['query']}\"[/bold cyan]\n\n"
+                f"  Tier: [{ex['color']}]{ex['tier']}[/{ex['color']}]  |  Why: [dim]{ex['why']}[/dim]",
+                title=f":speech_balloon: Example {i}",
+                border_style=ex["color"],
+                padding=(0, 1),
+            )
+        )
         console.print()
 
-    console.print(Panel(
-        "[bold]Run any of these with:[/bold]\n\n"
-        "  [cyan]modelhop route \"paste the query here\"[/cyan]\n\n"
-        "[bold]Or try the shorthand:[/bold]\n\n"
-        "  [cyan]modelhop r \"paste the query here\"[/cyan]",
-        border_style="cyan",
-        padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            "[bold]Run any of these with:[/bold]\n\n"
+            '  [cyan]modelhop route "paste the query here"[/cyan]\n\n'
+            "[bold]Or try the shorthand:[/bold]\n\n"
+            '  [cyan]modelhop r "paste the query here"[/cyan]',
+            border_style="cyan",
+            padding=(0, 1),
+        )
+    )
     console.print()

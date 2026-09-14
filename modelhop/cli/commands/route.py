@@ -1,9 +1,9 @@
-import click
 import asyncio
+
+import click
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.panel import Panel
-from rich.table import Table
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 console = Console()
 
@@ -25,40 +25,46 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
 
     if not mh.registry.get_available_providers():
         console.print()
-        console.print(Panel(
-            "[bold red]:x: No API keys found![/bold red]\n\n"
-            "Set at least one environment variable:\n"
-            "  [cyan]$env:GROQ_API_KEY=your-key[/cyan]\n"
-            "  [cyan]$env:GEMINI_API_KEY=your-key[/cyan]\n"
-            "  [cyan]$env:OPENAI_API_KEY=your-key[/cyan]",
-            title=":warning: Configuration Error",
-            border_style="red",
-        ))
+        console.print(
+            Panel(
+                "[bold red]:x: No API keys found![/bold red]\n\n"
+                "Set at least one environment variable:\n"
+                "  [cyan]$env:GROQ_API_KEY=your-key[/cyan]\n"
+                "  [cyan]$env:GEMINI_API_KEY=your-key[/cyan]\n"
+                "  [cyan]$env:OPENAI_API_KEY=your-key[/cyan]",
+                title=":warning: Configuration Error",
+                border_style="red",
+            )
+        )
         console.print()
         return
 
     if not mh.analyzer.providers:
         console.print()
-        console.print(Panel(
-            "[bold red]:x: No provider for query analysis![/bold red]\n\n"
-            "Set at least one API key:\n"
-            "  [cyan]$env:GROQ_API_KEY=your-key[/cyan]\n"
-            "  [cyan]$env:GEMINI_API_KEY=your-key[/cyan]\n"
-            "  [cyan]$env:OPENAI_API_KEY=your-key[/cyan]",
-            title=":warning: Configuration Error",
-            border_style="red",
-        ))
+        console.print(
+            Panel(
+                "[bold red]:x: No provider for query analysis![/bold red]\n\n"
+                "Set at least one API key:\n"
+                "  [cyan]$env:GROQ_API_KEY=your-key[/cyan]\n"
+                "  [cyan]$env:GEMINI_API_KEY=your-key[/cyan]\n"
+                "  [cyan]$env:OPENAI_API_KEY=your-key[/cyan]",
+                title=":warning: Configuration Error",
+                border_style="red",
+            )
+        )
         console.print()
         return
 
     if not json_output:
         console.print()
-        console.print(Panel(
-            "[bold green]:frog: ModelHop v1.0.0[/bold green]\n"
-            "[dim]Intelligent routing with multi-signal analysis & experience learning[/dim]",
-            border_style="green",
-            padding=(0, 2),
-        ))
+        console.print(
+            Panel(
+                "[bold green]:frog: ModelHop v1.0.0[/bold green]\n"
+                "[dim]Intelligent routing with multi-signal analysis & experience learning[/dim]",
+                border_style="green",
+                padding=(0, 2),
+            )
+        )
         console.print()
 
     try:
@@ -66,7 +72,7 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=console,
-            transient=True
+            transient=True,
         ) as progress:
             task = progress.add_task("  :mag: Extracting features...", total=None)
             query_features = mh.feature_extractor.extract(query)
@@ -76,7 +82,7 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=console,
-            transient=True
+            transient=True,
         ) as progress:
             task = progress.add_task("  :brain: Analyzing query...", total=None)
             analysis = await mh.analyzer.analyze(query)
@@ -86,7 +92,7 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=console,
-            transient=True
+            transient=True,
         ) as progress:
             task = progress.add_task("  :dart: Learning routing decision...", total=None)
             if force_model:
@@ -97,17 +103,17 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             progress.update(task, completed=True)
 
         if not json_output:
-            console.print(f"  :mag: [bold]Feature Extraction[/bold]")
+            console.print("  :mag: [bold]Feature Extraction[/bold]")
             console.print(f"     Query Type     : [cyan]{query_features.query_type.value}[/cyan]")
             console.print(f"     Code Keywords  : {query_features.code_keyword_count}")
             console.print(f"     Algorithm Terms: {query_features.algorithm_term_count}")
             if query_features.has_constraints:
-                console.print(f"     Constraints    : [yellow]detected[/yellow]")
+                console.print("     Constraints    : [yellow]detected[/yellow]")
             if query_features.requires_optimization:
-                console.print(f"     Optimization   : [yellow]required[/yellow]")
+                console.print("     Optimization   : [yellow]required[/yellow]")
             console.print()
 
-            console.print(f"  :brain: [bold]AI Analysis[/bold]")
+            console.print("  :brain: [bold]AI Analysis[/bold]")
             console.print(f"     Base Complexity : [cyan]{analysis.complexity:.2f}[/cyan]")
             console.print(f"     Capabilities   : {', '.join(analysis.capabilities_needed)}")
             if analysis.emotional_tone.value != "neutral":
@@ -116,7 +122,7 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
 
             similar = mh.memory.find_similar(query_features, top_k=3, min_similarity=0.4)
             if similar:
-                console.print(f"  :books: [bold]Experience Memory[/bold]")
+                console.print("  :books: [bold]Experience Memory[/bold]")
                 console.print(f"     Similar queries found : [cyan]{len(similar)}[/cyan]")
                 avg_q = sum(e.response_quality for e in similar) / len(similar)
                 console.print(f"     Avg historical quality: [cyan]{avg_q:.2f}[/cyan]")
@@ -128,7 +134,7 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             tier_emoji = {"free": ":free:", "mid": ":warning:", "premium": ":crown:"}
             color = tier_colors.get(decision.tier.value, "white")
             emoji = tier_emoji.get(decision.tier.value, "")
-            console.print(f"  :dart: [bold]Routing Decision[/bold]")
+            console.print("  :dart: [bold]Routing Decision[/bold]")
             console.print(f"     Model : [bold green]{decision.model.name}[/bold green]")
             console.print(f"     Tier  : [{color}]{emoji} {decision.tier.value.upper()}[/{color}]")
             console.print(f"     Reason: {decision.reason}")
@@ -149,7 +155,9 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             provider = mh.registry.get_provider(model_name)
             if provider is None:
                 if not json_output:
-                    console.print(f"  :warning: [yellow]Provider not available for {model_name}, trying next...[/yellow]")
+                    console.print(
+                        f"  :warning: [yellow]Provider not available for {model_name}, trying next...[/yellow]"
+                    )
                 next_decision = _get_next_fallback(mh, decision, tried_models)
                 if next_decision is None:
                     break
@@ -162,7 +170,7 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
                     SpinnerColumn(),
                     TextColumn("[progress.description]{task.description}"),
                     console=console,
-                    transient=True
+                    transient=True,
                 ) as progress:
                     task = progress.add_task("  :zap: Generating response...", total=None)
                     response = await provider.generate(query)
@@ -171,8 +179,10 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             except Exception as e:
                 error_msg = str(e)
                 if not json_output:
-                    console.print(f"  :warning: [yellow]{model_name} failed: {_short_error(error_msg)}[/yellow]")
-                    console.print(f"  :arrow_right: [dim]Falling back to next model...[/dim]")
+                    console.print(
+                        f"  :warning: [yellow]{model_name} failed: {_short_error(error_msg)}[/yellow]"
+                    )
+                    console.print("  :arrow_right: [dim]Falling back to next model...[/dim]")
                 next_decision = _get_next_fallback(mh, decision, tried_models)
                 if next_decision is None:
                     break
@@ -183,20 +193,22 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             if json_output:
                 console.print('{"error": "All models failed"}')
             else:
-                console.print(Panel(
-                    "[bold red]:x: All models failed![/bold red]\n\n"
-                    "No provider could handle this query.\n"
-                    "Check your API keys and model configuration.",
-                    title=":warning: Routing Failed",
-                    border_style="red",
-                ))
+                console.print(
+                    Panel(
+                        "[bold red]:x: All models failed![/bold red]\n\n"
+                        "No provider could handle this query.\n"
+                        "Check your API keys and model configuration.",
+                        title=":warning: Routing Failed",
+                        border_style="red",
+                    )
+                )
             return
 
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=console,
-            transient=True
+            transient=True,
         ) as progress:
             task = progress.add_task("  :mag: Checking confidence...", total=None)
             consensus_provider = _get_consensus_provider(mh, decision.model.name)
@@ -254,18 +266,21 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             response=response,
             confidence=confidence,
             cost=cost,
-            fallback_count=fallback_count + conf_fallback_count
+            fallback_count=fallback_count + conf_fallback_count,
         )
 
         mh.shield.check_quality(trace)
         mh.hop_score.update(confidence.is_confident)
 
         if fallback_count > 0 and not json_output:
-            console.print(f"  :recycle: [yellow]Fell back from {original_decision.model.name} to {decision.model.name}[/yellow]")
+            console.print(
+                f"  :recycle: [yellow]Fell back from {original_decision.model.name} to {decision.model.name}[/yellow]"
+            )
             console.print()
 
         if json_output:
             import json
+
             output = {
                 "query": query,
                 "features": {
@@ -288,12 +303,14 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             }
             console.print(json.dumps(output, indent=2))
         else:
-            console.print(Panel(
-                response.content,
-                title=":bulb: Response",
-                border_style="cyan",
-                padding=(0, 1),
-            ))
+            console.print(
+                Panel(
+                    response.content,
+                    title=":bulb: Response",
+                    border_style="cyan",
+                    padding=(0, 1),
+                )
+            )
             console.print()
 
             savings_pct = cost.savings_percentage
@@ -304,15 +321,17 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             else:
                 badge = "[dim]Some savings[/dim]"
 
-            console.print(Panel(
-                f"[green]:moneybag: Actual cost:          ${cost.actual_cost:.4f}[/green]\n"
-                f"[red]:x: Would cost (GPT-4):  ${cost.would_have_cost:.4f}[/red]\n"
-                f"[bold green]:sparkles: You saved:            ${cost.savings:.4f} ({cost.savings_percentage:.0f}%)[/bold green]\n"
-                f"{badge}",
-                title=":money_with_wings: Cost Analysis",
-                border_style="yellow",
-                padding=(0, 1),
-            ))
+            console.print(
+                Panel(
+                    f"[green]:moneybag: Actual cost:          ${cost.actual_cost:.4f}[/green]\n"
+                    f"[red]:x: Would cost (GPT-4):  ${cost.would_have_cost:.4f}[/red]\n"
+                    f"[bold green]:sparkles: You saved:            ${cost.savings:.4f} ({cost.savings_percentage:.0f}%)[/bold green]\n"
+                    f"{badge}",
+                    title=":money_with_wings: Cost Analysis",
+                    border_style="yellow",
+                    padding=(0, 1),
+                )
+            )
             console.print()
 
             hop = mh.hop_score.get_stats()
@@ -329,28 +348,34 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             else:
                 score_color = "red"
                 rating_emoji = ":warning:"
-            console.print(f"  :frog: [bold]Hop Score[/bold]")
-            console.print(f"     Score   : [{score_color}]{score}/100[/{score_color}] {rating_emoji}")
+            console.print("  :frog: [bold]Hop Score[/bold]")
+            console.print(
+                f"     Score   : [{score_color}]{score}/100[/{score_color}] {rating_emoji}"
+            )
             console.print(f"     Rating  : [{score_color}]{hop['rating']}[/{score_color}]")
-            console.print(f"     Queries : [cyan]{hop['total_queries']}[/cyan] total, [cyan]{hop['optimal_routes']}[/cyan] optimal")
+            console.print(
+                f"     Queries : [cyan]{hop['total_queries']}[/cyan] total, [cyan]{hop['optimal_routes']}[/cyan] optimal"
+            )
             console.print()
 
             if verbose:
                 stats = mh.memory.get_overall_stats()
                 perf_stats = mh.adaptive_threshold.get_stats()
                 hop = mh.hop_score.get_stats()
-                console.print(Panel(
-                    f"[bold]Intelligence Stats[/bold]\n"
-                    f"  Total experiences   : {stats['total']}\n"
-                    f"  Avg quality         : {stats['avg_quality']:.2f}\n"
-                    f"  Fallback rate       : {stats['fallback_rate']:.0%}\n"
-                    f"  Confidence threshold: {perf_stats['threshold']:.3f}\n"
-                    f"  Quality trend       : {perf_stats['trend']}\n"
-                    f"  Hop Score           : {hop['score']}/100 ({hop['rating']})",
-                    title=":brain: System Intelligence",
-                    border_style="magenta",
-                    padding=(0, 1),
-                ))
+                console.print(
+                    Panel(
+                        f"[bold]Intelligence Stats[/bold]\n"
+                        f"  Total experiences   : {stats['total']}\n"
+                        f"  Avg quality         : {stats['avg_quality']:.2f}\n"
+                        f"  Fallback rate       : {stats['fallback_rate']:.0%}\n"
+                        f"  Confidence threshold: {perf_stats['threshold']:.3f}\n"
+                        f"  Quality trend       : {perf_stats['trend']}\n"
+                        f"  Hop Score           : {hop['score']}/100 ({hop['rating']})",
+                        title=":brain: System Intelligence",
+                        border_style="magenta",
+                        padding=(0, 1),
+                    )
+                )
                 console.print()
 
             if response.latency_ms < 500:
@@ -362,20 +387,25 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             else:
                 lcolor = "white"
                 lrating = ":clock1: Good"
-            console.print(f"  :frog: Hopped in [bold {lcolor}]{response.latency_ms}ms[/bold {lcolor}]  {lrating}")
+            console.print(
+                f"  :frog: Hopped in [bold {lcolor}]{response.latency_ms}ms[/bold {lcolor}]  {lrating}"
+            )
             console.print()
 
     except Exception as e:
         error_msg = str(e)
         if json_output:
             import json
+
             console.print(json.dumps({"error": error_msg}))
         else:
-            console.print(Panel(
-                f"[red]{error_msg}[/red]",
-                title=":x: Error",
-                border_style="red",
-            ))
+            console.print(
+                Panel(
+                    f"[red]{error_msg}[/red]",
+                    title=":x: Error",
+                    border_style="red",
+                )
+            )
 
 
 def _get_next_fallback(mh, current_decision, tried_models):
@@ -385,6 +415,7 @@ def _get_next_fallback(mh, current_decision, tried_models):
             model = mh.registry.get_model(name)
             if model:
                 from modelhop.core.models import RoutingDecision
+
                 return RoutingDecision(
                     model=model,
                     tier=model.tier,

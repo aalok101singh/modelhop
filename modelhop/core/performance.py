@@ -1,10 +1,10 @@
 import json
 import os
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
-from collections import defaultdict
-from datetime import datetime, timedelta
-from .models import PerformanceMetrics, ModelProfile, QueryType, Tier
+
 from .memory import ExperienceMemory
+from .models import ModelProfile, PerformanceMetrics, QueryType
 
 PERF_FILE = "modelhop_performance.json"
 
@@ -37,10 +37,7 @@ class PerformanceTracker:
 
     def _persist(self):
         path = self._get_path()
-        data = {
-            "version": "1.0",
-            "profiles": {}
-        }
+        data = {"version": "1.0", "profiles": {}}
         for name, profile in self.profiles.items():
             data["profiles"][name] = profile.dict()
         try:

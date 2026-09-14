@@ -12,13 +12,15 @@ def welcome() -> None:
     from pathlib import Path
 
     console.print()
-    console.print(Panel(
-        "[bold green]:frog: Welcome to ModelHop![/bold green]\n\n"
-        "ModelHop routes your LLM queries to the [bold]cheapest capable model[/bold],\n"
-        "saving you 60-90%% on API costs while maintaining quality.",
-        border_style="green",
-        padding=(0, 2),
-    ))
+    console.print(
+        Panel(
+            "[bold green]:frog: Welcome to ModelHop![/bold green]\n\n"
+            "ModelHop routes your LLM queries to the [bold]cheapest capable model[/bold],\n"
+            "saving you 60-90%% on API costs while maintaining quality.",
+            border_style="green",
+            padding=(0, 2),
+        )
+    )
     console.print()
 
     checks = []
@@ -49,12 +51,14 @@ def welcome() -> None:
         checks.append("[yellow]:warning: modelhop.yaml not found[/yellow]")
         checks.append("   Run [cyan]modelhop init[/cyan] to create it")
 
-    console.print(Panel(
-        "\n".join(checks),
-        title=":mag: Setup Check",
-        border_style="cyan",
-        padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            "\n".join(checks),
+            title=":mag: Setup Check",
+            border_style="cyan",
+            padding=(0, 1),
+        )
+    )
     console.print()
 
     lines = [
@@ -71,10 +75,12 @@ def welcome() -> None:
         "  [cyan]modelhop stats[/cyan]     - View your savings",
     ]
 
-    console.print(Panel(
-        "\n".join(lines),
-        title=":rocket: Quick Start",
-        border_style="green",
-        padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title=":rocket: Quick Start",
+            border_style="green",
+            padding=(0, 1),
+        )
+    )
     console.print()

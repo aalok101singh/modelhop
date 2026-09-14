@@ -1,14 +1,17 @@
 import json
 import os
-from typing import List, Optional, Dict
-from datetime import datetime
 from collections import defaultdict
-from .models import (
-    Experience, QueryFeatures, QueryAnalysis, RoutingDecision,
-    QueryType, ModelConfig, Tier, ComplexityLevel, EmotionalTone,
-    ProviderResponse, ConfidenceResult, CostAnalysis
-)
+from datetime import datetime
+from typing import Dict, List, Optional
+
 from .features import FeatureExtractor
+from .models import (
+    Experience,
+    QueryAnalysis,
+    QueryFeatures,
+    QueryType,
+    RoutingDecision,
+)
 
 MEMORY_FILE = "modelhop_memory.json"
 TRACE_FILE = "trace_log.json"
@@ -44,14 +47,22 @@ class ExperienceMemory:
                     exp = Experience(
                         query_id=item.get("query_id", ""),
                         query=item.get("query", ""),
-                        query_features=QueryFeatures(**item["query_features"]) if item.get("query_features") else None,
+                        query_features=(
+                            QueryFeatures(**item["query_features"])
+                            if item.get("query_features")
+                            else None
+                        ),
                         response_quality=item.get("response_quality", 0.0),
                         fallback_used=item.get("fallback_used", False),
                         model_name=item.get("model_name", ""),
                         tier=item.get("tier", ""),
                         query_type=QueryType(item.get("query_type", "general")),
                         latency_ms=item.get("latency_ms", 0),
-                        timestamp=datetime.fromisoformat(item["timestamp"]) if item.get("timestamp") else datetime.now(),
+                        timestamp=(
+                            datetime.fromisoformat(item["timestamp"])
+                            if item.get("timestamp")
+                            else datetime.now()
+                        ),
                     )
                     self._index_experience(exp)
                 except Exception:
@@ -79,9 +90,15 @@ class ExperienceMemory:
                         fallback_used=trace.get("fallback_used", False),
                         model_name=trace.get("model", ""),
                         tier=trace.get("tier", ""),
-                        query_type=self._infer_query_type(features) if features else QueryType.GENERAL,
+                        query_type=(
+                            self._infer_query_type(features) if features else QueryType.GENERAL
+                        ),
                         latency_ms=trace.get("latency_ms", 0),
-                        timestamp=datetime.fromisoformat(trace["timestamp"]) if trace.get("timestamp") else datetime.now(),
+                        timestamp=(
+                            datetime.fromisoformat(trace["timestamp"])
+                            if trace.get("timestamp")
+                            else datetime.now()
+                        ),
                     )
                     self._index_experience(exp)
                 except Exception:
@@ -142,21 +159,14 @@ class ExperienceMemory:
         scored.sort(key=lambda x: -x[1])
         return [exp for exp, _ in scored[:top_k]]
 
-    def find_similar_by_type(
-        self, query_type: QueryType, limit: int = 20
-    ) -> List[Experience]:
+    def find_similar_by_type(self, query_type: QueryType, limit: int = 20) -> List[Experience]:
         return self._by_query_type.get(query_type, [])[:limit]
 
     def get_model_history(self, model_name: str) -> List[Experience]:
         return self._by_model.get(model_name, [])
 
-    def get_model_quality_for_type(
-        self, model_name: str, query_type: QueryType
-    ) -> Optional[float]:
-        exps = [
-            e for e in self._by_model.get(model_name, [])
-            if e.query_type == query_type
-        ]
+    def get_model_quality_for_type(self, model_name: str, query_type: QueryType) -> Optional[float]:
+        exps = [e for e in self._by_model.get(model_name, []) if e.query_type == query_type]
         if not exps:
             return None
         return sum(e.response_quality for e in exps) / len(exps)
@@ -178,18 +188,12 @@ class ExperienceMemory:
             "avg_quality": avg_quality,
             "fallback_rate": fallback_count / total,
             "model_usage": dict(model_usage),
-            "type_distribution": {
-                qt.value: len(exps)
-                for qt, exps in self._by_query_type.items()
-            },
+            "type_distribution": {qt.value: len(exps) for qt, exps in self._by_query_type.items()},
         }
 
     def _persist(self):
         path = self._get_memory_path()
-        data = {
-            "version": "1.0",
-            "experiences": []
-        }
+        data = {"version": "1.0", "experiences": []}
         for exp in self.experiences[-500:]:
             item = {
                 "query_id": exp.query_id,
