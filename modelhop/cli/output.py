@@ -2,6 +2,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from .._version import get_version
+from .display import tier_color, tier_emoji
+
 console = Console()
 
 
@@ -9,7 +12,8 @@ def print_header() -> None:
     console.print()
     console.print(
         Panel(
-            "[bold green]:frog: ModelHop v1.0.0[/bold green]\n[dim]Save 60-90% on LLM costs by hopping to the right model[/dim]",
+            f"[bold green]:frog: ModelHop v{get_version()}[/bold green]\n"
+            "[dim]Save 60-90% on LLM costs by hopping to the right model[/dim]",
             border_style="green",
             padding=(0, 2),
         )
@@ -29,10 +33,8 @@ def print_analysis(analysis) -> None:
 
 
 def print_routing(decision) -> None:
-    tier_colors = {"free": "green", "mid": "yellow", "premium": "red"}
-    tier_emoji = {"free": ":free:", "mid": ":warning:", "premium": ":crown:"}
-    color = tier_colors.get(decision.tier.value, "white")
-    emoji = tier_emoji.get(decision.tier.value, "")
+    color = tier_color(decision.tier.value)
+    emoji = tier_emoji(decision.tier.value)
     console.print("  :dart: [bold]Routing...[/bold]")
     console.print(f"     Model : [bold green]{decision.model.name}[/bold green]")
     console.print(f"     Tier  : [{color}]{emoji} {decision.tier.value.upper()}[/{color}]")
@@ -120,14 +122,23 @@ def print_benchmark_results(results: dict) -> None:
         f"{results['modelhop_latency']:.1f}s",
         f"{results['latency_improvement']:.1f}%",
     )
+    gpt4_quality = results.get("gpt4_quality")
+    quality_delta = results.get("quality_delta")
+    gpt4_quality_str = "n/a" if gpt4_quality is None else f"{gpt4_quality:.0f}%"
+    quality_delta_str = "n/a" if quality_delta is None else f"{quality_delta:.1f}%"
     table.add_row(
         "Quality Score",
-        f"{results['gpt4_quality']:.0f}%",
+        gpt4_quality_str,
         f"{results['modelhop_quality']:.0f}%",
-        f"{results['quality_delta']:.1f}%",
+        quality_delta_str,
     )
 
     console.print(table)
+    if gpt4_quality is None:
+        console.print(
+            "[dim]Quality = routed-response confidence. GPT-4 baseline not measured: "
+            "no premium provider was available.[/dim]"
+        )
     console.print()
 
 

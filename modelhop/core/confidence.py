@@ -52,18 +52,25 @@ class ConfidenceEngine:
         consensus_provider=None,
         query_features: Optional[QueryFeatures] = None,
     ) -> ConfidenceResult:
+        aux_responses = []
         if provider is not None:
-            confidence_score = await self._get_model_confidence(query, response.content, provider)
+            confidence_score, aux = await self._get_model_confidence(
+                query, response.content, provider
+            )
+            if aux is not None:
+                aux_responses.append(aux)
         else:
             confidence_score = self._heuristic_confidence(query, response, query_features)
 
         consensus_score = None
         consensus_model = None
+        consensus_failure = None
 
         if self.enable_consensus and consensus_provider and confidence_score < self.threshold:
-            consensus_score, consensus_model = await self._check_consensus(
+            consensus_score, consensus_model, consensus_failure, aux = await self._check_consensus(
                 query, response, consensus_provider
             )
+            aux_responses.extend(aux)
 
         if consensus_score is not None:
             final_score = (confidence_score + consensus_score) / 2
@@ -71,7 +78,9 @@ class ConfidenceEngine:
             final_score = confidence_score
 
         is_confident = final_score >= self.threshold
-        reasoning = self._build_reasoning(final_score, is_confident, consensus_score)
+        reasoning = self._build_reasoning(
+            final_score, is_confident, consensus_score, consensus_failure
+        )
 
         return ConfidenceResult(
             score=final_score,
@@ -80,6 +89,7 @@ class ConfidenceEngine:
             consensus_model=consensus_model,
             consensus_score=consensus_score,
             reasoning=reasoning,
+            auxiliary_responses=aux_responses,
         )
 
     def _heuristic_confidence(
@@ -121,46 +131,64 @@ class ConfidenceEngine:
 
         return max(0.3, min(0.95, score))
 
-    async def _get_model_confidence(self, query: str, response: str, provider=None) -> float:
+    async def _get_model_confidence(self, query: str, response: str, provider=None):
         if provider is None:
-            return 0.85
+            return 0.85, None
 
         prompt = CONFIDENCE_PROMPT.format(query=query, response=response)
         try:
             result = await provider.generate(prompt, max_tokens=100, temperature=0.1)
             data = self._extract_json(result.content)
-            return data.get("confidence", 0.85)
+            score = data.get("confidence", 0.85) if data else 0.85
+            aux = result if isinstance(result, ProviderResponse) else None
+            return score, aux
         except Exception:
-            return 0.85
+            return 0.85, None
 
     async def _check_consensus(
         self, query: str, response: ProviderResponse, consensus_provider
     ) -> tuple:
+        aux_responses = []
         try:
             consensus_response = await consensus_provider.generate(query, max_tokens=500)
+            if isinstance(consensus_response, ProviderResponse):
+                aux_responses.append(consensus_response)
             prompt = CONSENSUS_PROMPT.format(
                 query=query, response_a=response.content, response_b=consensus_response.content
             )
             judge_result = await consensus_provider.generate(
                 prompt, max_tokens=100, temperature=0.1
             )
+            if isinstance(judge_result, ProviderResponse):
+                aux_responses.append(judge_result)
             data = self._extract_json(judge_result.content)
-            similarity = data.get("similarity", 0.88)
-            return similarity, consensus_response.model_used
-        except Exception:
-            return 0.88, None
+            if data is None or "similarity" not in data:
+                return None, None, "Consensus response could not be parsed", aux_responses
+            similarity = data["similarity"]
+            consensus_model = (
+                consensus_response.model_used
+                if isinstance(consensus_response, ProviderResponse)
+                else None
+            )
+            return similarity, consensus_model, None, aux_responses
+        except Exception as exc:
+            return None, None, f"Consensus check failed: {exc}", aux_responses
 
-    def _extract_json(self, text: str) -> dict:
+    def _extract_json(self, text: str) -> Optional[dict]:
         json_match = re.search(r"\{[^{}]*\}", text, re.DOTALL)
         if json_match:
             try:
                 return json.loads(json_match.group())
             except json.JSONDecodeError:
-                pass
-        return {"confidence": 0.85, "reasoning": "Failed to parse"}
+                return None
+        return None
 
     def _build_reasoning(
-        self, score: float, is_confident: bool, consensus_score: Optional[float]
+        self,
+        score: float,
+        is_confident: bool,
+        consensus_score: Optional[float],
+        consensus_failure: Optional[str] = None,
     ) -> str:
         if is_confident:
             base = f"Response is confident (score: {score:.2f})"
@@ -169,5 +197,7 @@ class ConfidenceEngine:
 
         if consensus_score is not None:
             base += f" | Cross-model consensus: {consensus_score:.2f}"
+        elif consensus_failure is not None:
+            base += f" | Consensus unavailable: {consensus_failure}"
 
         return base

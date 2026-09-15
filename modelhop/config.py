@@ -68,6 +68,7 @@ EXAMPLE_CONFIG = {
         "cross_model_consensus": True,
         "fallback": "cascade",
         "max_retries": 3,
+        "decompose_queries": True,
     },
     "shield": {"enabled": True, "quality_threshold": 0.8},
     "tracking": {"log_queries": True, "log_costs": True},
@@ -76,6 +77,7 @@ EXAMPLE_CONFIG = {
 
 class Config:
     def __init__(self, config_path: Optional[str] = None):
+        _load_env_file()
         self.config_path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
         self.config = self._load_config()
 

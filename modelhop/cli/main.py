@@ -1,14 +1,11 @@
-from importlib.metadata import version as get_version
-
 import click
 from rich.console import Console
 
+from .._version import get_version
+
 console = Console(force_terminal=True)
 
-try:
-    __version__ = get_version("modelhop")
-except Exception:
-    __version__ = "0.0.0"
+__version__ = get_version()
 
 
 @click.group(invoke_without_command=True)

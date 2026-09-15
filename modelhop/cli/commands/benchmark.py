@@ -7,6 +7,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+from ...tracking.cost_tracker import estimate_cost
+
 console = Console()
 
 
@@ -47,8 +49,16 @@ async def _benchmark_async(query_count: int, json_output: bool) -> None:
     modelhop_savings_total = 0.0
     total_gpt4_latency = 0.0
     total_modelhop_latency = 0.0
+    total_confidence = 0.0
+    total_baseline_quality = 0.0
+    baseline_count = 0
     success_count = 0
     model_distribution = {}
+
+    baseline_model = next(
+        (m for m in mh.models if m.tier.value == "premium" or m.provider == "openai"), None
+    )
+    baseline_provider = mh.registry.get_provider(baseline_model.name) if baseline_model else None
 
     if not json_output:
         console.print()
@@ -71,6 +81,7 @@ async def _benchmark_async(query_count: int, json_output: bool) -> None:
         for i, query in enumerate(query_list):
             try:
                 analysis = await mh.analyzer.analyze(query)
+                query_features = mh.feature_extractor.extract(query)
                 decision = mh.router.route(analysis)
 
                 provider = mh.registry.get_provider(decision.model.name)
@@ -79,13 +90,31 @@ async def _benchmark_async(query_count: int, json_output: bool) -> None:
                     continue
 
                 response = await provider.generate(query)
-                cost = mh.cost_tracker.calculate(response, decision.model)
+                confidence = await mh.confidence_engine.check(
+                    query, response, provider=provider, query_features=query_features
+                )
+                cost = estimate_cost(response, decision.model)
+
+                if baseline_provider is not None and baseline_provider is not provider:
+                    try:
+                        baseline_response = await baseline_provider.generate(query)
+                        baseline_confidence = await mh.confidence_engine.check(
+                            query,
+                            baseline_response,
+                            baseline_provider,
+                            query_features=query_features,
+                        )
+                        total_baseline_quality += baseline_confidence.score
+                        baseline_count += 1
+                    except Exception:
+                        pass
 
                 gpt4_total_cost += cost.would_have_cost
                 modelhop_total_cost += cost.actual_cost
                 modelhop_savings_total += cost.savings
                 total_gpt4_latency += 1.2
                 total_modelhop_latency += response.latency_ms / 1000
+                total_confidence += confidence.score
                 success_count += 1
 
                 model_name = decision.model.name
@@ -112,6 +141,8 @@ async def _benchmark_async(query_count: int, json_output: bool) -> None:
     avg_gpt4_latency = total_gpt4_latency / success_count
     avg_modelhop_latency = total_modelhop_latency / success_count
     savings_pct = (modelhop_savings_total / gpt4_total_cost * 100) if gpt4_total_cost > 0 else 0
+    routed_quality = (total_confidence / success_count * 100) if success_count else 0
+    baseline_quality = (total_baseline_quality / baseline_count * 100) if baseline_count else None
     latency_improvement = (
         ((avg_gpt4_latency - avg_modelhop_latency) / avg_gpt4_latency * 100)
         if avg_gpt4_latency > 0
@@ -131,9 +162,11 @@ async def _benchmark_async(query_count: int, json_output: bool) -> None:
         "gpt4_latency": avg_gpt4_latency,
         "modelhop_latency": avg_modelhop_latency,
         "latency_improvement": latency_improvement,
-        "gpt4_quality": 98,
-        "modelhop_quality": 97,
-        "quality_delta": -1,
+        "gpt4_quality": round(baseline_quality) if baseline_quality is not None else None,
+        "modelhop_quality": round(routed_quality),
+        "quality_delta": (
+            round(routed_quality - baseline_quality, 1) if baseline_quality is not None else None
+        ),
         "distribution": distribution_pcts,
     }
 

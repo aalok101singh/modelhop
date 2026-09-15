@@ -5,6 +5,28 @@ from typing import List, Optional
 from ..core.models import CostAnalysis, ModelConfig, ProviderResponse
 
 
+def estimate_cost(response: ProviderResponse, model: ModelConfig) -> CostAnalysis:
+    actual_cost = (response.tokens_in / 1000) * model.cost_per_1k_input + (
+        response.tokens_out / 1000
+    ) * model.cost_per_1k_output
+
+    would_have_cost = (response.tokens_in / 1000) * CostTracker.GPT4_COST_PER_1K_INPUT + (
+        response.tokens_out / 1000
+    ) * CostTracker.GPT4_COST_PER_1K_OUTPUT
+
+    savings = would_have_cost - actual_cost
+    savings_percentage = (savings / would_have_cost * 100) if would_have_cost > 0 else 0
+
+    return CostAnalysis(
+        actual_cost=actual_cost,
+        would_have_cost=would_have_cost,
+        savings=savings,
+        savings_percentage=savings_percentage,
+        model_used=model.name,
+        tier=model.tier.value,
+    )
+
+
 class CostTracker:
     GPT4_COST_PER_1K_INPUT = 0.03
     GPT4_COST_PER_1K_OUTPUT = 0.06
@@ -38,23 +60,23 @@ class CostTracker:
         except Exception:
             pass
 
-    def calculate(self, response: ProviderResponse, model: ModelConfig) -> CostAnalysis:
-        actual_cost = (response.tokens_in / 1000) * model.cost_per_1k_input + (
-            response.tokens_out / 1000
-        ) * model.cost_per_1k_output
-
-        would_have_cost = (response.tokens_in / 1000) * self.GPT4_COST_PER_1K_INPUT + (
-            response.tokens_out / 1000
-        ) * self.GPT4_COST_PER_1K_OUTPUT
-
-        savings = would_have_cost - actual_cost
-        savings_percentage = (savings / would_have_cost * 100) if would_have_cost > 0 else 0
+    def calculate(
+        self,
+        response: ProviderResponse,
+        model: ModelConfig,
+        extra_actual: float = 0.0,
+        extra_would: float = 0.0,
+    ) -> CostAnalysis:
+        base = estimate_cost(response, model)
+        total_actual = base.actual_cost + extra_actual
+        total_would = base.would_have_cost + extra_would
+        savings = base.savings + (extra_would - extra_actual)
 
         analysis = CostAnalysis(
-            actual_cost=actual_cost,
-            would_have_cost=would_have_cost,
+            actual_cost=total_actual,
+            would_have_cost=total_would,
             savings=savings,
-            savings_percentage=savings_percentage,
+            savings_percentage=(savings / total_would * 100) if total_would > 0 else 0,
             model_used=model.name,
             tier=model.tier.value,
         )

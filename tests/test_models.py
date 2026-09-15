@@ -1,17 +1,14 @@
 """Tests for data models."""
-import pytest
+
 from modelhop.core.models import (
-    HopScoreResult,
-    RoutingDecision,
-    QueryFeatures,
-    QueryAnalysis,
-    ModelConfig,
-    ProviderResponse,
-    ConfidenceResult,
-    CostAnalysis,
-    Tier,
     ComplexityLevel,
+    HopScoreResult,
+    ModelConfig,
+    QueryAnalysis,
+    QueryFeatures,
     QueryType,
+    RoutingDecision,
+    Tier,
 )
 
 

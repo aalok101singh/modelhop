@@ -1,7 +1,7 @@
 """Tests for configuration loading."""
-import pytest
+
 import yaml
-from pathlib import Path
+
 from modelhop.config import EXAMPLE_CONFIG, Config
 
 
@@ -19,8 +19,13 @@ class TestExampleConfig:
 
     def test_model_required_fields(self):
         required_fields = [
-            "name", "provider", "model", "tier",
-            "capabilities", "cost_per_1k_input", "cost_per_1k_output",
+            "name",
+            "provider",
+            "model",
+            "tier",
+            "capabilities",
+            "cost_per_1k_input",
+            "cost_per_1k_output",
             "api_key_env",
         ]
         for model in EXAMPLE_CONFIG["models"]:

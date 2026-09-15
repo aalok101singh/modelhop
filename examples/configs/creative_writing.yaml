@@ -1,9 +1,48 @@
-"""
-Example: creative_writing - Part of ModelHop v1.0.0
-"""
+version: "1.0"
+name: "creative-writing"
 
-def main():
-    print("TODO: Implement creative_writing example")
+# Creative-writing routing config: draft-heavy workloads stay on free
+# tier; long/multi-step story arcs with complex narrative go to premium.
 
-if __name__ == "__main__":
-    main()
+models:
+  - name: groq-qwen3-8-27b
+    provider: groq
+    model: qwen/qwen3.8-27b
+    tier: free
+    capabilities: [faq, general, classification, reasoning, creative]
+    cost_per_1k_input: 0.0
+    cost_per_1k_output: 0.0
+    api_key_env: GROQ_API_KEY
+
+  - name: gemini-3.6-flash
+    provider: gemini
+    model: gemini-3.6-flash
+    tier: free
+    capabilities: [faq, general, reasoning, creative]
+    cost_per_1k_input: 0.0
+    cost_per_1k_output: 0.0
+    api_key_env: GEMINI_API_KEY
+
+  - name: openai-gpt-4
+    provider: openai
+    model: gpt-4
+    tier: premium
+    capabilities: [reasoning, coding, analysis, creative]
+    cost_per_1k_input: 0.03
+    cost_per_1k_output: 0.06
+    api_key_env: OPENAI_API_KEY
+
+routing:
+  confidence_threshold: 0.7
+  cross_model_consensus: true
+  fallback: cascade
+  max_retries: 3
+  decompose_queries: true
+
+shield:
+  enabled: true
+  quality_threshold: 0.8
+
+tracking:
+  log_queries: true
+  log_costs: true
