@@ -1,11 +1,16 @@
 """Tests for provider construction and validation."""
 
 from modelhop.config import Config
+from modelhop.core.models import ProviderResponse
 from modelhop.registry.model_registry import ModelRegistry
 
 
-def test_model_registry_instantiates_only_keyed_providers(tmp_path):
+def test_model_registry_instantiates_only_keyed_providers(tmp_path, monkeypatch):
     """Providers without API keys should not be instantiated."""
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     config_file = tmp_path / "cfg.yaml"
     config_file.write_text("""
 models:
@@ -211,3 +216,50 @@ routing: {}
     assert cheapest.name == "free-a"
     cheapest_coding = registry.get_cheapest_model(["coding"])
     assert cheapest_coding.name == "premium-a"
+
+
+def test_dummy_key_creates_provider_with_mocked_constructor(tmp_path, monkeypatch):
+    """A dummy key plus a mocked provider class should instantiate successfully."""
+    monkeypatch.setenv("GROQ_API_KEY", "dummy-groq-key")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    from modelhop.registry import model_registry
+
+    class FakeGroq:
+        def __init__(self, api_key: str, model: str):
+            self.api_key = api_key
+            self.model = model
+
+        async def generate(self, prompt, max_tokens=100, temperature=0.7):
+            return ProviderResponse(
+                content="fake",
+                model_used=self.model,
+                provider="groq",
+                tokens_in=10,
+                tokens_out=5,
+            )
+
+        async def validate_connection(self):
+            return True
+
+    monkeypatch.setitem(model_registry.PROVIDER_MAP, "groq", FakeGroq)
+
+    config_file = tmp_path / "cfg.yaml"
+    config_file.write_text("""
+models:
+  - name: groq-a
+    provider: groq
+    model: qwen/qwen3.8-27b
+    tier: free
+    capabilities: [general]
+    cost_per_1k_input: 0
+    cost_per_1k_output: 0
+    api_key_env: GROQ_API_KEY
+routing: {}
+""")
+    cfg = Config(str(config_file))
+    registry = ModelRegistry(cfg)
+    providers = registry.get_available_providers()
+    assert len(providers) == 1
+    assert "groq-a" in providers

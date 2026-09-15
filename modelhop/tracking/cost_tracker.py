@@ -60,8 +60,26 @@ class CostTracker:
         except Exception:
             pass
 
-    def calculate(self, response: ProviderResponse, model: ModelConfig) -> CostAnalysis:
-        analysis = estimate_cost(response, model)
+    def calculate(
+        self,
+        response: ProviderResponse,
+        model: ModelConfig,
+        extra_actual: float = 0.0,
+        extra_would: float = 0.0,
+    ) -> CostAnalysis:
+        base = estimate_cost(response, model)
+        total_actual = base.actual_cost + extra_actual
+        total_would = base.would_have_cost + extra_would
+        savings = base.savings + (extra_would - extra_actual)
+
+        analysis = CostAnalysis(
+            actual_cost=total_actual,
+            would_have_cost=total_would,
+            savings=savings,
+            savings_percentage=(savings / total_would * 100) if total_would > 0 else 0,
+            model_used=model.name,
+            tier=model.tier.value,
+        )
 
         self.history.append(analysis)
         self._log_cost(analysis)

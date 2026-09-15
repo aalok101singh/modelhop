@@ -122,14 +122,23 @@ def print_benchmark_results(results: dict) -> None:
         f"{results['modelhop_latency']:.1f}s",
         f"{results['latency_improvement']:.1f}%",
     )
+    gpt4_quality = results.get("gpt4_quality")
+    quality_delta = results.get("quality_delta")
+    gpt4_quality_str = "n/a" if gpt4_quality is None else f"{gpt4_quality:.0f}%"
+    quality_delta_str = "n/a" if quality_delta is None else f"{quality_delta:.1f}%"
     table.add_row(
         "Quality Score",
-        f"{results['gpt4_quality']:.0f}%",
+        gpt4_quality_str,
         f"{results['modelhop_quality']:.0f}%",
-        f"{results['quality_delta']:.1f}%",
+        quality_delta_str,
     )
 
     console.print(table)
+    if gpt4_quality is None:
+        console.print(
+            "[dim]Quality = routed-response confidence. GPT-4 baseline not measured: "
+            "no premium provider was available.[/dim]"
+        )
     console.print()
 
 
