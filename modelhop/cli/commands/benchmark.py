@@ -7,6 +7,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+from ...tracking.cost_tracker import estimate_cost
+
 console = Console()
 
 
@@ -48,8 +50,15 @@ async def _benchmark_async(query_count: int, json_output: bool) -> None:
     total_gpt4_latency = 0.0
     total_modelhop_latency = 0.0
     total_confidence = 0.0
+    total_baseline_quality = 0.0
+    baseline_count = 0
     success_count = 0
     model_distribution = {}
+
+    baseline_model = next(
+        (m for m in mh.models if m.tier.value == "premium" or m.provider == "openai"), None
+    )
+    baseline_provider = mh.registry.get_provider(baseline_model.name) if baseline_model else None
 
     if not json_output:
         console.print()
@@ -82,9 +91,23 @@ async def _benchmark_async(query_count: int, json_output: bool) -> None:
 
                 response = await provider.generate(query)
                 confidence = await mh.confidence_engine.check(
-                    query, response, provider=None, query_features=query_features
+                    query, response, provider=provider, query_features=query_features
                 )
-                cost = mh.cost_tracker.calculate(response, decision.model)
+                cost = estimate_cost(response, decision.model)
+
+                if baseline_provider is not None and baseline_provider is not provider:
+                    try:
+                        baseline_response = await baseline_provider.generate(query)
+                        baseline_confidence = await mh.confidence_engine.check(
+                            query,
+                            baseline_response,
+                            baseline_provider,
+                            query_features=query_features,
+                        )
+                        total_baseline_quality += baseline_confidence.score
+                        baseline_count += 1
+                    except Exception:
+                        pass
 
                 gpt4_total_cost += cost.would_have_cost
                 modelhop_total_cost += cost.actual_cost
@@ -118,7 +141,8 @@ async def _benchmark_async(query_count: int, json_output: bool) -> None:
     avg_gpt4_latency = total_gpt4_latency / success_count
     avg_modelhop_latency = total_modelhop_latency / success_count
     savings_pct = (modelhop_savings_total / gpt4_total_cost * 100) if gpt4_total_cost > 0 else 0
-    avg_quality = (total_confidence / success_count * 100) if success_count else 0
+    routed_quality = (total_confidence / success_count * 100) if success_count else 0
+    baseline_quality = (total_baseline_quality / baseline_count * 100) if baseline_count else None
     latency_improvement = (
         ((avg_gpt4_latency - avg_modelhop_latency) / avg_gpt4_latency * 100)
         if avg_gpt4_latency > 0
@@ -138,9 +162,11 @@ async def _benchmark_async(query_count: int, json_output: bool) -> None:
         "gpt4_latency": avg_gpt4_latency,
         "modelhop_latency": avg_modelhop_latency,
         "latency_improvement": latency_improvement,
-        "gpt4_quality": round(avg_quality),
-        "modelhop_quality": round(avg_quality),
-        "quality_delta": 0,
+        "gpt4_quality": round(baseline_quality) if baseline_quality is not None else None,
+        "modelhop_quality": round(routed_quality),
+        "quality_delta": (
+            round(routed_quality - baseline_quality, 1) if baseline_quality is not None else None
+        ),
         "distribution": distribution_pcts,
     }
 

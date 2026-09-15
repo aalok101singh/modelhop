@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 from .config import Config
 from .core.adaptive_threshold import AdaptiveThreshold
@@ -116,77 +116,33 @@ class ModelHop:
         query_features: QueryFeatures,
         decision: RoutingDecision,
     ):
-        max_retries = self.fallback.max_retries
+        budget = self.fallback.max_retries + 1
+        attempts = 0
         tried = {decision.model.name}
         current = decision
-        fallback_count = 0
-        response = None
-        provider = None
+        best = None
+        all_aux: List[ProviderResponse] = []
 
-        while fallback_count < max_retries + 1:
+        while attempts < budget:
             provider = self.registry.get_provider(current.model.name)
+            attempts += 1
             if provider is None:
-                nxt = self._next_fallback_decision(current, tried)
+                nxt = self._next_fallback_decision(current, tried, analysis)
                 if nxt is None:
                     break
                 current = nxt
                 tried.add(nxt.model.name)
-                fallback_count += 1
                 continue
             try:
                 response = await provider.generate(query)
-                break
             except Exception:
-                nxt = self._next_fallback_decision(current, tried)
+                nxt = self._next_fallback_decision(current, tried, analysis)
                 if nxt is None:
                     break
                 current = nxt
                 tried.add(nxt.model.name)
-                fallback_count += 1
                 continue
 
-        if response is None:
-            raise RuntimeError(f"No provider could handle the query after {max_retries} retries")
-
-        confidence = await self.confidence_engine.check(
-            query,
-            response,
-            provider,
-            consensus_provider=self._get_consensus_provider(current.model.name),
-            query_features=query_features,
-        )
-
-        conf_fallback_count = 0
-        while not confidence.is_confident and conf_fallback_count < max_retries:
-            fb = await self.fallback.handle_low_confidence(
-                query, analysis, current.model, confidence
-            )
-            if fb is None:
-                fb = self._next_fallback_decision(current, tried)
-                if fb is None:
-                    break
-            current = fb
-            tried.add(current.model.name)
-            fb_provider = self.registry.get_provider(current.model.name)
-            if fb_provider is None:
-                fb = self._next_fallback_decision(current, tried)
-                if fb is None:
-                    break
-                current = fb
-                tried.add(current.model.name)
-                fb_provider = self.registry.get_provider(current.model.name)
-                if fb_provider is None:
-                    break
-            provider = fb_provider
-            try:
-                response = await provider.generate(query)
-            except Exception:
-                fb = self._next_fallback_decision(current, tried)
-                if fb is None:
-                    break
-                current = fb
-                tried.add(current.model.name)
-                continue
             confidence = await self.confidence_engine.check(
                 query,
                 response,
@@ -194,9 +150,27 @@ class ModelHop:
                 consensus_provider=self._get_consensus_provider(current.model.name),
                 query_features=query_features,
             )
-            conf_fallback_count += 1
+            all_aux.extend(confidence.auxiliary_responses)
 
-        return response, confidence, current, fallback_count + conf_fallback_count
+            if confidence.is_confident:
+                confidence = confidence.model_copy(update={"auxiliary_responses": all_aux})
+                return response, confidence, current, attempts - 1
+
+            best = (current, response, confidence)
+            nxt = self._next_fallback_decision(current, tried, analysis)
+            if nxt is None:
+                break
+            current = nxt
+            tried.add(nxt.model.name)
+
+        if best is not None:
+            current, response, confidence = best
+            confidence = confidence.model_copy(update={"auxiliary_responses": all_aux})
+            return response, confidence, current, attempts - 1
+
+        raise RuntimeError(
+            f"No provider could handle the query after {self.fallback.max_retries} retries"
+        )
 
     async def _route_decomposed(
         self,
@@ -215,9 +189,9 @@ class ModelHop:
         tokens_in = 0
         tokens_out = 0
         perf_records = []
+        failed_parts = []
         tracking = self.config.get_tracking_config()
         log_queries = tracking.get("log_queries", True)
-        log_costs = tracking.get("log_costs", True)
 
         for sub in sub_queries:
             try:
@@ -244,12 +218,15 @@ class ModelHop:
                         fb > 0,
                     )
                 )
-                if log_costs:
-                    costs.append(self.cost_tracker.calculate(resp, final_decision.model))
-                else:
-                    costs.append(estimate_cost(resp, final_decision.model))
-            except Exception:
+                costs.append(self._route_cost(resp, final_decision.model, conf))
+            except Exception as exc:
+                failed_parts.append(f"'{sub.query}' (purpose: {sub.purpose or 'complete'}): {exc}")
                 continue
+
+        if failed_parts:
+            raise RuntimeError(
+                f"Some sub-queries for '{query}' failed: " + " | ".join(failed_parts)
+            )
 
         if not responses:
             raise RuntimeError(f"All sub-queries for '{query}' failed")
@@ -332,7 +309,6 @@ class ModelHop:
     ) -> None:
         tracking = self.config.get_tracking_config()
         log_queries = tracking.get("log_queries", True)
-        log_costs = tracking.get("log_costs", True)
 
         if log_queries:
             self.memory.record(
@@ -353,10 +329,7 @@ class ModelHop:
             )
             self.adaptive_threshold.adjust(confidence.score)
 
-        if log_costs:
-            cost = self.cost_tracker.calculate(response, decision.model)
-        else:
-            cost = estimate_cost(response, decision.model)
+        cost = self._route_cost(response, decision.model, confidence)
 
         if log_queries:
             trace = self.trace_logger.log(
@@ -378,20 +351,63 @@ class ModelHop:
         return None
 
     def _next_fallback_decision(
-        self, current_decision: RoutingDecision, tried_models
+        self,
+        current_decision: RoutingDecision,
+        tried_models,
+        analysis: Optional[QueryAnalysis] = None,
     ) -> Optional[RoutingDecision]:
-        for name in self.registry.get_available_providers():
-            if name in tried_models or name == current_decision.model.name:
-                continue
-            model = self.registry.get_model(name)
-            if model:
-                return RoutingDecision(
-                    model=model,
-                    tier=model.tier,
-                    reason=f"Fallback from {current_decision.model.name}",
-                    alternatives=[],
-                )
-        return None
+        available = set(self.registry.get_available_providers())
+        model = self.fallback.next_candidate(
+            current_decision.model, analysis, set(tried_models), available
+        )
+        if model is None:
+            return None
+        return RoutingDecision(
+            model=model,
+            tier=model.tier,
+            reason=f"Fallback from {current_decision.model.name}",
+            alternatives=[],
+        )
+
+    def _resolve_cost_model(self, name: str, fallback: ModelConfig) -> ModelConfig:
+        model = self.registry.get_model(name)
+        if model is not None:
+            return model
+        for candidate in self.models:
+            if candidate.model == name:
+                return candidate
+        return fallback
+
+    def _confidence_aux_cost(self, confidence: ConfidenceResult, model: ModelConfig):
+        extra_actual = 0.0
+        extra_would = 0.0
+        for aux in confidence.auxiliary_responses:
+            aux_model = self._resolve_cost_model(aux.model_used, model)
+            aux_cost = estimate_cost(aux, aux_model)
+            extra_actual += aux_cost.actual_cost
+            extra_would += aux_cost.would_have_cost
+        return extra_actual, extra_would
+
+    def _route_cost(
+        self, response: ProviderResponse, model: ModelConfig, confidence: ConfidenceResult
+    ) -> CostAnalysis:
+        extra_actual, extra_would = self._confidence_aux_cost(confidence, model)
+        if self.config.get_tracking_config().get("log_costs", True):
+            return self.cost_tracker.calculate(
+                response, model, extra_actual=extra_actual, extra_would=extra_would
+            )
+        base = estimate_cost(response, model)
+        total_actual = base.actual_cost + extra_actual
+        total_would = base.would_have_cost + extra_would
+        savings = base.savings + (extra_would - extra_actual)
+        return CostAnalysis(
+            actual_cost=total_actual,
+            would_have_cost=total_would,
+            savings=savings,
+            savings_percentage=(savings / total_would * 100) if total_would > 0 else 0,
+            model_used=model.name,
+            tier=model.tier.value,
+        )
 
 
 __all__ = [
@@ -429,6 +445,7 @@ __all__ = [
     "QueryDecomposer",
     "ModelRegistry",
     "CostTracker",
+    "estimate_cost",
     "TraceLogger",
     "HopScore",
     "Shield",

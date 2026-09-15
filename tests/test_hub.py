@@ -43,7 +43,7 @@ def hub_dir():
 
 @pytest.fixture
 def hub(hub_dir):
-    return Hub()
+    return Hub(configs_path=str(hub_dir))
 
 
 def test_list_configs_finds_community_configs(hub):

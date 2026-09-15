@@ -70,6 +70,7 @@ class ConfidenceResult(BaseModel):
     consensus_model: Optional[str] = None
     consensus_score: Optional[float] = None
     reasoning: str = ""
+    auxiliary_responses: List[ProviderResponse] = Field(default_factory=list)
 
 
 class CostAnalysis(BaseModel):

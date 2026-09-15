@@ -15,7 +15,7 @@ import asyncio
 from rich.console import Console
 from rich.panel import Panel
 
-from modelhop import ModelHop
+from modelhop import ModelHop, estimate_cost
 
 console = Console()
 
@@ -77,7 +77,7 @@ async def main() -> None:
         console.print(Panel(response.content, title=":bulb: Answer", border_style="cyan"))
         model = mh.registry.get_model(response.model_used)
         if model is not None:
-            cost = mh.cost_tracker.calculate(response, model)
+            cost = estimate_cost(response, model)
             console.print(
                 f"  :moneybag: ${cost.actual_cost:.4f} actual vs "
                 f"${cost.would_have_cost:.4f} GPT-4  "

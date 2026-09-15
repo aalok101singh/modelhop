@@ -15,7 +15,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from modelhop import ModelHop
+from modelhop import ModelHop, estimate_cost
 
 console = Console()
 
@@ -73,7 +73,7 @@ async def main() -> None:
             console.print()
             continue
 
-        cost = mh.cost_tracker.calculate(response, model)
+        cost = estimate_cost(response, model)
         total_cost += cost.actual_cost
         total_would_have += cost.would_have_cost
 

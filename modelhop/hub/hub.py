@@ -9,8 +9,8 @@ COMMUNITY_CONFIGS_PATH = Path(__file__).parent.parent.parent / "data" / "communi
 
 
 class Hub:
-    def __init__(self):
-        self.configs_path = COMMUNITY_CONFIGS_PATH
+    def __init__(self, configs_path: Optional[str] = None):
+        self.configs_path = Path(configs_path) if configs_path else COMMUNITY_CONFIGS_PATH
 
     def list_configs(self) -> List[HubConfig]:
         configs = []
