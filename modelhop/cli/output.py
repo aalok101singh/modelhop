@@ -2,6 +2,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from .._version import get_version
+from .display import tier_color, tier_emoji
+
 console = Console()
 
 
@@ -9,7 +12,8 @@ def print_header() -> None:
     console.print()
     console.print(
         Panel(
-            "[bold green]:frog: ModelHop v1.0.0[/bold green]\n[dim]Save 60-90% on LLM costs by hopping to the right model[/dim]",
+            f"[bold green]:frog: ModelHop v{get_version()}[/bold green]\n"
+            "[dim]Save 60-90% on LLM costs by hopping to the right model[/dim]",
             border_style="green",
             padding=(0, 2),
         )
@@ -29,10 +33,8 @@ def print_analysis(analysis) -> None:
 
 
 def print_routing(decision) -> None:
-    tier_colors = {"free": "green", "mid": "yellow", "premium": "red"}
-    tier_emoji = {"free": ":free:", "mid": ":warning:", "premium": ":crown:"}
-    color = tier_colors.get(decision.tier.value, "white")
-    emoji = tier_emoji.get(decision.tier.value, "")
+    color = tier_color(decision.tier.value)
+    emoji = tier_emoji(decision.tier.value)
     console.print("  :dart: [bold]Routing...[/bold]")
     console.print(f"     Model : [bold green]{decision.model.name}[/bold green]")
     console.print(f"     Tier  : [{color}]{emoji} {decision.tier.value.upper()}[/{color}]")

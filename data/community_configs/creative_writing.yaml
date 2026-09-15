@@ -1,12 +1,17 @@
 version: "1.0"
-name: "default"
+name: creative-writing
+author: "ModelHop Community"
+description: "Creative writing routing: drafts stay on free tier, long multi-step story arcs go premium"
+rating: 4.4
+downloads: 98
+tags: [creative, writing, story, content]
 
 models:
   - name: groq-qwen3-8-27b
     provider: groq
     model: qwen/qwen3.8-27b
     tier: free
-    capabilities: [faq, general, classification, reasoning]
+    capabilities: [faq, general, classification, reasoning, creative]
     cost_per_1k_input: 0.0
     cost_per_1k_output: 0.0
     api_key_env: GROQ_API_KEY
@@ -15,7 +20,7 @@ models:
     provider: gemini
     model: gemini-3.6-flash
     tier: free
-    capabilities: [faq, general, reasoning]
+    capabilities: [faq, general, reasoning, creative]
     cost_per_1k_input: 0.0
     cost_per_1k_output: 0.0
     api_key_env: GEMINI_API_KEY
@@ -34,6 +39,7 @@ routing:
   cross_model_consensus: true
   fallback: cascade
   max_retries: 3
+  decompose_queries: true
 
 shield:
   enabled: true

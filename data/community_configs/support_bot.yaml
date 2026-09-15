@@ -1,5 +1,10 @@
 version: "1.0"
-name: "default"
+name: support-bot
+author: "ModelHop Community"
+description: "Support desk routing: fast FAQ answers on free tier, premium only for deep troubleshooting"
+rating: 4.6
+downloads: 142
+tags: [support, faq, chat, customer-service]
 
 models:
   - name: groq-qwen3-8-27b
@@ -34,6 +39,7 @@ routing:
   cross_model_consensus: true
   fallback: cascade
   max_retries: 3
+  decompose_queries: true
 
 shield:
   enabled: true

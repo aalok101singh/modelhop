@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .memory import ExperienceMemory
 from .models import ModelProfile, PerformanceMetrics, QueryType
+from .persistence import atomic_write_json
 
 PERF_FILE = "modelhop_performance.json"
 
@@ -39,10 +40,9 @@ class PerformanceTracker:
         path = self._get_path()
         data = {"version": "1.0", "profiles": {}}
         for name, profile in self.profiles.items():
-            data["profiles"][name] = profile.dict()
+            data["profiles"][name] = profile.model_dump()
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, default=str)
+            atomic_write_json(path, data)
         except Exception:
             pass
 
@@ -66,7 +66,7 @@ class PerformanceTracker:
         qt_key = exp.query_type.value
 
         if qt_key not in profile.performance_by_query_type:
-            profile.performance_by_query_type[qt_key] = PerformanceMetrics().dict()
+            profile.performance_by_query_type[qt_key] = PerformanceMetrics().model_dump()
 
         metrics_data = profile.performance_by_query_type[qt_key]
         metrics = PerformanceMetrics(**metrics_data)
@@ -93,7 +93,7 @@ class PerformanceTracker:
         metrics.fallback_rate = total_fallback / (n + weight)
         metrics.success_rate = 1.0 - metrics.fallback_rate
 
-        profile.performance_by_query_type[qt_key] = metrics.dict()
+        profile.performance_by_query_type[qt_key] = metrics.model_dump()
 
         all_qualities = []
         for qt, m_data in profile.performance_by_query_type.items():
@@ -126,7 +126,7 @@ class PerformanceTracker:
         qt_key = query_type.value
 
         if qt_key not in profile.performance_by_query_type:
-            profile.performance_by_query_type[qt_key] = PerformanceMetrics().dict()
+            profile.performance_by_query_type[qt_key] = PerformanceMetrics().model_dump()
 
         metrics_data = profile.performance_by_query_type[qt_key]
         metrics = PerformanceMetrics(**metrics_data)
@@ -139,7 +139,7 @@ class PerformanceTracker:
         metrics.fallback_rate = total_fallback / (n + 1)
         metrics.success_rate = 1.0 - metrics.fallback_rate
 
-        profile.performance_by_query_type[qt_key] = metrics.dict()
+        profile.performance_by_query_type[qt_key] = metrics.model_dump()
 
         all_q = [
             PerformanceMetrics(**d).avg_quality
