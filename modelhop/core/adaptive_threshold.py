@@ -3,6 +3,8 @@ import os
 from datetime import datetime
 from typing import List
 
+from .persistence import atomic_write_json
+
 ADAPTIVE_FILE = "modelhop_adaptive.json"
 
 
@@ -46,8 +48,7 @@ class AdaptiveThreshold:
             "last_updated": datetime.now().isoformat(),
         }
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+            atomic_write_json(path, data)
         except Exception:
             pass
 

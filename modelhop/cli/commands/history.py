@@ -5,6 +5,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ..display import tier_color
+
 console = Console()
 
 
@@ -65,8 +67,7 @@ def history(limit: int, json_output: bool) -> None:
         table.add_column("Latency", min_width=10)
 
         for entry in entries:
-            tier_colors = {"free": "green", "mid": "yellow", "premium": "red"}
-            color = tier_colors.get(entry.decision.tier.value, "white")
+            color = tier_color(entry.decision.tier.value)
             table.add_row(
                 entry.query_id,
                 entry.query[:30] + "..." if len(entry.query) > 30 else entry.query,

@@ -579,7 +579,7 @@ class FeatureExtractor:
         }
 
     def _classify_query_type(self, intent: Dict, lexical: Dict, complexity: Dict) -> QueryType:
-        if intent["is_implementation"] or lexical["code_keyword_count"] >= 2:
+        if intent["is_implementation"]:
             return QueryType.IMPLEMENTATION
         if intent["is_debugging"]:
             return QueryType.DEBUGGING
@@ -589,6 +589,8 @@ class FeatureExtractor:
             return QueryType.COMPARISON
         if intent["is_explanation"]:
             return QueryType.EXPLANATION
+        if lexical["code_keyword_count"] >= 2:
+            return QueryType.IMPLEMENTATION
         return QueryType.GENERAL
 
     def _build_feature_vector(

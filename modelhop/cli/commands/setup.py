@@ -1,29 +1,15 @@
 import asyncio
-import os
 from pathlib import Path
 
 import click
 from rich.console import Console
 from rich.panel import Panel
 
+from ...config import _load_env_file
+
 console = Console(force_terminal=True)
 
 ENV_PATH = Path(".env")
-
-
-def _load_env() -> None:
-    if not ENV_PATH.exists():
-        return
-    with open(ENV_PATH, "r") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" in line:
-                key, _, value = line.partition("=")
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                os.environ[key] = value
 
 
 def _save_env(keys: dict) -> None:
@@ -64,7 +50,7 @@ def _update_config_models(keys: dict) -> None:
                 "provider": "groq",
                 "model": "qwen/qwen3.8-27b",
                 "tier": "free",
-                "capabilities": ["faq", "general", "classification", "reasoning"],
+                "capabilities": ["faq", "general", "classification", "reasoning", "coding"],
                 "cost_per_1k_input": 0.0,
                 "cost_per_1k_output": 0.0,
                 "api_key_env": "GROQ_API_KEY",
@@ -212,6 +198,7 @@ def setup() -> None:
 
     _save_env(keys)
     _update_config_models(keys)
+    _load_env_file()
 
     console.print("[bold]Testing connections...[/bold]\n")
 

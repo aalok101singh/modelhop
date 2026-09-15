@@ -29,6 +29,15 @@
 
 **ModelHop** is an intelligent LLM router that automatically picks the cheapest capable model for each query. It uses multi-signal feature extraction, experience-based learning, and adaptive confidence thresholds to route simple queries to free models while reserving premium models for complex tasks.
 
+## Documentation
+
+Detailed guides live in the [`docs/`](docs/) folder:
+
+- [Index & How Routing Works](docs/index.md)
+- [Python SDK](docs/sdk.md)
+- [Configuration](docs/config.md)
+- [Troubleshooting](docs/troubleshooting.md)
+
 ## Quick Start
 
 ```bash
@@ -108,6 +117,12 @@ Query → Feature Extraction → AI Analysis → Learning Router → Model Selec
 - Per-model performance tracking
 - Adaptive confidence thresholds
 
+**Fallback & Decomposition:**
+- Provider failures cascade free → mid → premium (empty tiers are skipped, so
+  free → premium works even with no mid model configured)
+- `decompose_queries: true` (default) splits complex queries into sub-questions,
+  routes each, and merges the answers
+
 **Examples:**
 
 ```bash
@@ -136,6 +151,10 @@ Every query shows cost savings:
 ╰──────────────────────────────────────────────────────────╯
 ```
 
+Savings are estimated with `estimate_cost()` and shown even when cost logging is
+turned off. The `benchmark` command reports measured model quality (from heuristic
+confidence checks), not pre-baked numbers.
+
 ## Verbose Mode
 
 Add `--verbose` for full intelligence stats:
@@ -161,6 +180,10 @@ modelhop init
 | `qwen/qwen3.8-27b` | Groq | Free | $0.00 |
 | `gemini-3.6-flash` | Google | Free | $0.00 |
 | `gpt-4` | OpenAI | Premium | $0.03/$0.06 per 1K |
+
+Key routing option: `decompose_queries: true` (default) — complex queries are
+split into sub-questions, routed independently, and merged. See
+[Configuration](docs/config.md) for the full schema.
 
 ## Development
 
