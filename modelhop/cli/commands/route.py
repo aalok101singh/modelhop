@@ -5,6 +5,10 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+from ..._version import get_version
+from ...tracking.cost_tracker import estimate_cost
+from ..display import tier_color, tier_emoji
+
 console = Console()
 
 
@@ -59,7 +63,7 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
         console.print()
         console.print(
             Panel(
-                "[bold green]:frog: ModelHop v1.0.0[/bold green]\n"
+                f"[bold green]:frog: ModelHop v{get_version()}[/bold green]\n"
                 "[dim]Intelligent routing with multi-signal analysis & experience learning[/dim]",
                 border_style="green",
                 padding=(0, 2),
@@ -130,10 +134,8 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
                 console.print(f"     Models tried          : {', '.join(models_seen)}")
                 console.print()
 
-            tier_colors = {"free": "green", "mid": "yellow", "premium": "red"}
-            tier_emoji = {"free": ":free:", "mid": ":warning:", "premium": ":crown:"}
-            color = tier_colors.get(decision.tier.value, "white")
-            emoji = tier_emoji.get(decision.tier.value, "")
+            color = tier_color(decision.tier.value)
+            emoji = tier_emoji(decision.tier.value)
             console.print("  :dart: [bold]Routing Decision[/bold]")
             console.print(f"     Model : [bold green]{decision.model.name}[/bold green]")
             console.print(f"     Tier  : [{color}]{emoji} {decision.tier.value.upper()}[/{color}]")
@@ -147,8 +149,9 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
         fallback_count = 0
         tried_models = set()
         original_decision = decision
+        max_retries = mh.fallback.max_retries
 
-        while fallback_count < 4:
+        while fallback_count < max_retries + 1:
             model_name = decision.model.name
             tried_models.add(model_name)
 
@@ -218,7 +221,7 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             progress.update(task, completed=True)
 
         conf_fallback_count = 0
-        while not confidence.is_confident and conf_fallback_count < 3:
+        while not confidence.is_confident and conf_fallback_count < max_retries:
             fallback_decision = await mh.fallback.handle_low_confidence(
                 query, analysis, decision.model, confidence
             )
@@ -239,38 +242,47 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
             )
             conf_fallback_count += 1
 
-        mh.memory.record(
-            query=query,
-            query_features=query_features,
-            analysis=analysis,
-            decision=decision,
-            response_quality=confidence.score,
-            fallback_used=fallback_count > 0 or conf_fallback_count > 0,
-            latency_ms=response.latency_ms,
-        )
-        mh.performance.record_outcome(
-            model_name=decision.model.name,
-            query_type=query_features.query_type,
-            quality=confidence.score,
-            latency_ms=response.latency_ms,
-            fallback_used=fallback_count > 0 or conf_fallback_count > 0,
-        )
-        mh.adaptive_threshold.adjust(confidence.score)
+        tracking = mh.config.get_tracking_config()
+        log_queries = tracking.get("log_queries", True)
+        log_costs = tracking.get("log_costs", True)
 
-        cost = mh.cost_tracker.calculate(response, decision.model)
+        if log_queries:
+            mh.memory.record(
+                query=query,
+                query_features=query_features,
+                analysis=analysis,
+                decision=decision,
+                response_quality=confidence.score,
+                fallback_used=fallback_count > 0 or conf_fallback_count > 0,
+                latency_ms=response.latency_ms,
+            )
+            mh.performance.record_outcome(
+                model_name=decision.model.name,
+                query_type=query_features.query_type,
+                quality=confidence.score,
+                latency_ms=response.latency_ms,
+                fallback_used=fallback_count > 0 or conf_fallback_count > 0,
+            )
+            mh.adaptive_threshold.adjust(confidence.score)
 
-        trace = mh.trace_logger.log(
-            query=query,
-            analysis=analysis,
-            decision=decision,
-            response=response,
-            confidence=confidence,
-            cost=cost,
-            fallback_count=fallback_count + conf_fallback_count,
-        )
+        if log_costs:
+            cost = mh.cost_tracker.calculate(response, decision.model)
+        else:
+            cost = estimate_cost(response, decision.model)
 
-        mh.shield.check_quality(trace)
-        mh.hop_score.update(confidence.is_confident)
+        if log_queries:
+            trace = mh.trace_logger.log(
+                query=query,
+                analysis=analysis,
+                decision=decision,
+                response=response,
+                confidence=confidence,
+                cost=cost,
+                fallback_count=fallback_count + conf_fallback_count,
+            )
+
+            mh.shield.check_quality(trace)
+            mh.hop_score.update(confidence.is_confident)
 
         if fallback_count > 0 and not json_output:
             console.print(
@@ -362,6 +374,21 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
                 stats = mh.memory.get_overall_stats()
                 perf_stats = mh.adaptive_threshold.get_stats()
                 hop = mh.hop_score.get_stats()
+                explanation = mh.reasoning_engine.explain(
+                    query=query,
+                    analysis=analysis,
+                    decision=decision,
+                    query_features=query_features,
+                    merged_reasoning=reasoning,
+                )
+                console.print(
+                    Panel(
+                        explanation,
+                        title=":thought_balloon: Routing Rationale",
+                        border_style="cyan",
+                    )
+                )
+                console.print()
                 console.print(
                     Panel(
                         f"[bold]Intelligence Stats[/bold]\n"

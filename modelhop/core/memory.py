@@ -12,6 +12,7 @@ from .models import (
     QueryType,
     RoutingDecision,
 )
+from .persistence import atomic_write_json
 
 MEMORY_FILE = "modelhop_memory.json"
 TRACE_FILE = "trace_log.json"
@@ -229,7 +230,6 @@ class ExperienceMemory:
             data["experiences"].append(item)
 
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, default=str)
+            atomic_write_json(path, data)
         except Exception:
             pass

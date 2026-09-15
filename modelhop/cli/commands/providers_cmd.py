@@ -5,6 +5,8 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from ..display import tier_color
+
 console = Console()
 
 
@@ -56,11 +58,9 @@ def providers(json_output: bool) -> None:
         table.add_column("Tier", min_width=10)
         table.add_column("Status", min_width=14)
 
-        tier_colors = {"free": "green", "mid": "yellow", "premium": "red"}
-
         for model in mh.registry.get_models():
             provider = mh.registry.get_provider(model.name)
-            color = tier_colors.get(model.tier.value, "white")
+            color = tier_color(model.tier.value)
             if provider:
                 connected = asyncio.run(_test_provider(provider))
                 if connected:

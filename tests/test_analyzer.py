@@ -1,5 +1,5 @@
 """Tests for QueryAnalyzer."""
-import pytest
+
 from modelhop.core.analyzer import QueryAnalyzer
 from modelhop.core.models import ComplexityLevel
 

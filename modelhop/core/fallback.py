@@ -17,10 +17,11 @@ class CascadeFallback:
     def get_next_tier(self, current_tier: Tier) -> Optional[Tier]:
         try:
             current_index = self.tier_order.index(current_tier)
-            if current_index + 1 < len(self.tier_order):
-                return self.tier_order[current_index + 1]
         except ValueError:
-            pass
+            return None
+        for tier in self.tier_order[current_index + 1 :]:
+            if self.tier_models.get(tier):
+                return tier
         return None
 
     def get_models_for_tier(self, tier: Tier) -> List[ModelConfig]:

@@ -50,3 +50,8 @@ htmlcov/
 
 # Config (user-specific)
 modelhop.yaml
+
+# Local build documentation (never pushed)
+Build Files/
+BUILD.md
+scaffold.py

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "modelhop"
-version = "1.0.8"
+version = "1.0.9"
 description = "Intelligent LLM router that saves 60-90% on API costs by hopping to the cheapest capable model"
 readme = "README.md"
 license = "MIT"
