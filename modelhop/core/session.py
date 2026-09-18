@@ -31,6 +31,8 @@ class TaskSession:
             return False, "budget exceeded"
         if self.token_ceiling is not None and (self.tokens + est_tokens) > self.token_ceiling:
             return False, "token ceiling exceeded"
+        if self.latency_ceiling_ms is not None and self.latency_ms >= self.latency_ceiling_ms:
+            return False, "latency ceiling exceeded"
         return True, ""
 
     def record(self, cost: float, tokens: int, latency_ms: int, escalation: str = "") -> None:
@@ -43,11 +45,7 @@ class TaskSession:
 
     def exhausted(self) -> bool:
         ok, _ = self.check_allow()
-        if not ok:
-            return True
-        if self.latency_ceiling_ms is not None and self.latency_ms >= self.latency_ceiling_ms:
-            return True
-        return False
+        return not ok
 
 
 class SessionManager:

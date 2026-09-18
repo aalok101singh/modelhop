@@ -24,7 +24,7 @@ export async function chatCompletions(
       "Content-Type": "application/json",
       ...(opts.apiKey ? { Authorization: `Bearer ${opts.apiKey}` } : {}),
     },
-    body: JSON.stringify({ model: opts.model || "auto", messages, stream: false }),
+    body: JSON.stringify({ model: opts.model || "auto", messages, stream: opts.stream ?? false }),
   });
   if (!res.ok) throw new Error(`ModelHop error ${res.status}: ${await res.text()}`);
   const data = await res.json();

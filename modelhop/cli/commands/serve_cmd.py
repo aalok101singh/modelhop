@@ -17,5 +17,10 @@ def serve(host: str, port: int) -> None:
         raise SystemExit(1)
     from modelhop.serve.app import create_app
 
-    app = create_app()
+    public_bind = host not in ("127.0.0.1", "localhost", "::1")
+    try:
+        app = create_app(public_bind=public_bind)
+    except RuntimeError as exc:
+        console.print(str(exc))
+        raise SystemExit(1)
     uvicorn.run(app, host=host, port=port)

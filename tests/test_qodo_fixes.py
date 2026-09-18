@@ -208,7 +208,7 @@ def test_ledger_append_raises_when_unwritable(tmp_path):
     assert len(ledger) == 0
 
 
-# -- Q20: zero propensity excluded ----------------------------------------------
+# -- Q20: zero/missing propensity excluded --------------------------------------
 def test_zero_propensity_excluded():
     from modelhop.eval.offline import doubly_robust, ips_estimate
 
@@ -217,9 +217,10 @@ def test_zero_propensity_excluded():
         {"reward": 1.0, "propensity": 0.0},
         {"reward": 1.0},
     ]
-    # (2.0 + 1.0) / 2: the zero-support row is excluded, not scored as 1.0.
-    assert ips_estimate(rows, lambda r: 1.0) == 1.5
-    assert doubly_robust(rows, lambda r: 1.0, lambda r: 0.0) == 1.5
+    # Only the supported row counts (2.0/1): zero-support and missing
+    # propensity rows are excluded, never fabricated as 1.0.
+    assert ips_estimate(rows, lambda r: 1.0) == 2.0
+    assert doubly_robust(rows, lambda r: 1.0, lambda r: 0.0) == 2.0
 
 
 # -- Q13: sub vetting keeps safety gates, tolerates capability gaps ------------

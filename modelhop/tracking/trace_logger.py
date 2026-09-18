@@ -93,9 +93,16 @@ class TraceLogger:
         cache_hit: bool = False,
         degraded: bool = False,
         policy_version: str = "1",
+        allow_text: bool = True,
     ) -> TraceEntry:
-        # Strip raw_response before persistence (never serialized anyway via exclude=True).
-        safe_response = response.model_copy(update={"raw_response": None})
+        # Privacy: no_raw_cache redacts generated text; raw_response never persists.
+        if allow_text:
+            safe_response = response.model_copy(update={"raw_response": None})
+        else:
+            safe_response = response.model_copy(
+                update={"raw_response": None, "content": "[redacted]"}
+            )
+            query = "[redacted]"
         trace = TraceEntry(
             query_id=str(uuid.uuid4())[:8],
             query=query,

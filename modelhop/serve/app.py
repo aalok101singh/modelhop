@@ -14,6 +14,7 @@ from typing import Optional
 
 MAX_BODY_BYTES = 256 * 1024
 RATE_LIMIT_PER_MIN = 120
+MAX_RATE_LIMIT_CLIENTS = 10000
 
 # Module-level import: FastAPI resolves handler annotations (Request, Header)
 # via module globals. A function-local import leaves ForwardRef('Request')
@@ -29,7 +30,7 @@ except ImportError:  # pragma: no cover - server extra not installed
     _FASTAPI_AVAILABLE = False
 
 
-def create_app(mh=None):
+def create_app(mh=None, public_bind: bool = False):
     if not _FASTAPI_AVAILABLE:
         raise ImportError("Server extra required: pip install modelhop[server]")
 
@@ -43,14 +44,33 @@ def create_app(mh=None):
     app = FastAPI(title="ModelHop", version="1.1.0")
     _hits: dict = defaultdict(list)
 
+    def _server_key_configured() -> bool:
+        try:
+            return bool(secrets.get("MODELHOP_API_KEY") or secrets.get("OPENAI_API_KEY"))
+        except Exception:
+            return False
+
+    # Fail-closed at startup: a public bind without a server key would expose
+    # billable provider access to unauthenticated network clients.
+    if public_bind and not _server_key_configured():
+        raise RuntimeError(
+            "Refusing public bind without MODELHOP_API_KEY/OPENAI_API_KEY. "
+            "Bind 127.0.0.1 or set a server key."
+        )
+
     def _check_auth(authorization: Optional[str] = Header(default=None)):
         try:
             expected = secrets.get("MODELHOP_API_KEY") or secrets.get("OPENAI_API_KEY")
         except Exception:
             # Fail closed: a broken secret backend must never open the server.
             raise HTTPException(status_code=503, detail="Secret backend unavailable")
-        # If no server key configured, allow (single-user local default).
+        # Loopback-only single-user default: anon allowed only when no server
+        # key is configured AND the server is not publicly bound.
         if not expected:
+            if public_bind:
+                raise HTTPException(
+                    status_code=403, detail="Authentication required for public bind"
+                )
             return True
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="Missing bearer token")
@@ -62,8 +82,15 @@ def create_app(mh=None):
     def _rate_limit(request: Request):
         key = request.client.host if request.client else "anon"
         now = time.time()
-        window = [t for t in _hits[key] if now - t < 60]
-        _hits[key] = window
+        window = [t for t in _hits.get(key, []) if now - t < 60]
+        if not window:
+            _hits.pop(key, None)
+        else:
+            _hits[key] = window
+        # Bound memory: evict oldest clients when tracking too many.
+        if len(_hits) > MAX_RATE_LIMIT_CLIENTS:
+            oldest = next(iter(_hits))
+            _hits.pop(oldest, None)
         if len(window) >= RATE_LIMIT_PER_MIN:
             raise HTTPException(status_code=429, detail="Rate limited")
         window.append(now)
@@ -85,6 +112,15 @@ def create_app(mh=None):
     ):
         _check_auth(authorization)
         _rate_limit(request)
+        # Pre-check Content-Length before buffering (covers non-chunked bodies).
+        try:
+            content_length = request.headers.get("content-length")
+            if content_length is not None and int(content_length) > MAX_BODY_BYTES:
+                raise HTTPException(status_code=413, detail="Request body too large")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
         body = await request.body()
         if len(body) > MAX_BODY_BYTES:
             raise HTTPException(status_code=413, detail="Request body too large")

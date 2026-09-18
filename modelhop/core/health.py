@@ -81,10 +81,19 @@ class CircuitBreaker:
             self._state[key] = CircuitState.OPEN
             self._opened_at[key] = time.monotonic()
 
+    def _peek_state(self, key: str) -> CircuitState:
+        """Read-only transition OPEN -> HALF_OPEN without consuming the probe."""
+        state = self._state[key]
+        if state == CircuitState.OPEN:
+            opened = self._opened_at.get(key, 0.0)
+            if (time.monotonic() - opened) >= self.recovery_timeout_s:
+                self._state[key] = CircuitState.HALF_OPEN
+                return CircuitState.HALF_OPEN
+        return self._state[key]
+
     def state(self, key: str) -> str:
-        # Opportunistically transition OPEN -> HALF_OPEN on read.
-        self.allow(key)
-        return self._state[key].value
+        # Read-only: never consume the single half-open probe on inspection.
+        return self._peek_state(key).value
 
 
 class HealthRegistry:
