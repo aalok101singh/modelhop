@@ -2,14 +2,22 @@ import asyncio
 from pathlib import Path
 
 import click
-from rich.console import Console
 from rich.panel import Panel
 
 from ...config import _load_env_file
+from ..display import get_console
+from ..provider_errors import PROVIDER_DEFAULT_MODELS, candidate_models, test_connection
 
-console = Console(force_terminal=True)
+console = get_console(force_terminal=True)
 
 ENV_PATH = Path(".env")
+
+PROVIDER_LABELS = {"groq": "Groq", "gemini": "Gemini", "openai": "OpenAI"}
+PROVIDER_KEY_ENVS = {
+    "groq": "GROQ_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "openai": "OPENAI_API_KEY",
+}
 
 
 def _save_env(keys: dict) -> None:
@@ -30,7 +38,39 @@ def _save_env(keys: dict) -> None:
         f.writelines(lines)
 
 
-def _update_config_models(keys: dict) -> None:
+def _remove_env_keys(names: list) -> None:
+    if not ENV_PATH.exists() or not names:
+        return
+    with open(ENV_PATH, "r") as f:
+        lines = [
+            line for line in f.readlines() if not any(line.strip().startswith(n) for n in names)
+        ]
+    with open(ENV_PATH, "w") as f:
+        f.writelines(lines)
+
+
+def _model_slug(model: str) -> str:
+    return model.replace("/", "-").replace(".", "").replace("_", "-").lower()
+
+
+def _configured_model(provider: str) -> str:
+    try:
+        import yaml
+
+        config_path = Path("modelhop.yaml")
+        if config_path.exists():
+            with open(config_path, "r") as f:
+                config = yaml.safe_load(f) or {}
+            for m in config.get("models", []):
+                if m.get("provider") == provider and m.get("model"):
+                    return str(m["model"])
+    except Exception:
+        pass
+    return PROVIDER_DEFAULT_MODELS.get(provider, "")
+
+
+def _update_config_models(connected: dict) -> None:
+    """Wire only providers with a verified working model (add or update)."""
     import yaml
 
     config_path = Path("modelhop.yaml")
@@ -42,84 +82,95 @@ def _update_config_models(keys: dict) -> None:
 
     models = config.get("models", [])
 
-    groq_models = [m for m in models if m.get("provider") == "groq"]
-    if keys.get("GROQ_API_KEY") and not groq_models:
-        models.append(
-            {
-                "name": "groq-qwen3-8-27b",
-                "provider": "groq",
-                "model": "qwen/qwen3.8-27b",
-                "tier": "free",
-                "capabilities": ["faq", "general", "classification", "reasoning", "coding"],
-                "cost_per_1k_input": 0.0,
-                "cost_per_1k_output": 0.0,
-                "api_key_env": "GROQ_API_KEY",
-            }
-        )
+    defaults = {
+        "groq": {
+            "tier": "free",
+            "capabilities": ["faq", "general", "classification", "reasoning", "coding"],
+            "cost_per_1k_input": 0.0,
+            "cost_per_1k_output": 0.0,
+            "api_key_env": "GROQ_API_KEY",
+        },
+        "gemini": {
+            "tier": "free",
+            "capabilities": ["faq", "general", "reasoning"],
+            "cost_per_1k_input": 0.0,
+            "cost_per_1k_output": 0.0,
+            "api_key_env": "GEMINI_API_KEY",
+        },
+        "openai": {
+            "tier": "premium",
+            "capabilities": ["reasoning", "coding", "analysis", "creative"],
+            "cost_per_1k_input": 0.03,
+            "cost_per_1k_output": 0.06,
+            "api_key_env": "OPENAI_API_KEY",
+        },
+    }
 
-    gemini_models = [m for m in models if m.get("provider") == "gemini"]
-    if keys.get("GEMINI_API_KEY") and not gemini_models:
-        models.append(
-            {
-                "name": "gemini-3.6-flash",
-                "provider": "gemini",
-                "model": "gemini-3.6-flash",
-                "tier": "free",
-                "capabilities": ["faq", "general", "reasoning"],
-                "cost_per_1k_input": 0.0,
-                "cost_per_1k_output": 0.0,
-                "api_key_env": "GEMINI_API_KEY",
-            }
-        )
-
-    openai_models = [m for m in models if m.get("provider") == "openai"]
-    if keys.get("OPENAI_API_KEY") and not openai_models:
-        models.append(
-            {
-                "name": "openai-gpt-4",
-                "provider": "openai",
-                "model": "gpt-4",
-                "tier": "premium",
-                "capabilities": ["reasoning", "coding", "analysis", "creative"],
-                "cost_per_1k_input": 0.03,
-                "cost_per_1k_output": 0.06,
-                "api_key_env": "OPENAI_API_KEY",
-            }
-        )
+    for provider, model in connected.items():
+        if not model:
+            continue
+        name = f"{provider}-{_model_slug(model)}"
+        existing = [m for m in models if m.get("provider") == provider]
+        if existing:
+            for m in existing:
+                m["model"] = model
+                m["name"] = name
+        else:
+            base = dict(defaults.get(provider, {}))
+            base.update({"name": name, "provider": provider, "model": model})
+            models.append(base)
 
     config["models"] = models
     with open(config_path, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
 
 
-async def _test_connection(provider_name: str, api_key: str, model: str) -> bool:
-    try:
-        if provider_name == "groq":
-            from groq import AsyncGroq
+def _ensure_config_exists() -> bool:
+    """Create modelhop.yaml from defaults when missing. Returns True if created."""
+    import yaml
 
-            client = AsyncGroq(api_key=api_key)
-            await client.chat.completions.create(
-                model=model, messages=[{"role": "user", "content": "Hi"}], max_tokens=5
-            )
-            return True
-        elif provider_name == "gemini":
-            import google.generativeai as genai
+    from ...config import EXAMPLE_CONFIG
 
-            genai.configure(api_key=api_key)
-            m = genai.GenerativeModel(model)
-            await m.generate_content_async("Hi")
-            return True
-        elif provider_name == "openai":
-            from openai import AsyncOpenAI
-
-            client = AsyncOpenAI(api_key=api_key)
-            await client.chat.completions.create(
-                model=model, messages=[{"role": "user", "content": "Hi"}], max_tokens=5
-            )
-            return True
-    except Exception:
+    config_path = Path("modelhop.yaml")
+    if config_path.exists():
         return False
-    return False
+    try:
+        with open(config_path, "w") as f:
+            yaml.dump(EXAMPLE_CONFIG, f, default_flow_style=False)
+        return True
+    except OSError:
+        return False
+
+
+def _remove_config_models(providers: list) -> None:
+    """Drop provider models from config (declined => treated as not configured)."""
+    import yaml
+
+    config_path = Path("modelhop.yaml")
+    if not config_path.exists() or not providers:
+        return
+    try:
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f) or {}
+        models = [m for m in config.get("models", []) if m.get("provider") not in providers]
+        config["models"] = models
+        with open(config_path, "w") as f:
+            yaml.dump(config, f, default_flow_style=False)
+    except Exception:
+        pass
+
+
+def _probe_alternatives(provider: str, api_key: str, configured: str) -> tuple:
+    """Probe fallback catalog. Returns (working_model|None, tried:[(model, detail)])."""
+    tried = []
+    for model in candidate_models(provider, configured):
+        if model == configured:
+            continue  # already tested
+        ok, _kind, detail = asyncio.run(test_connection(provider, api_key, model))
+        tried.append((model, detail))
+        if ok:
+            return model, tried
+    return None, tried
 
 
 @click.command()
@@ -130,7 +181,8 @@ def setup() -> None:
         Panel(
             "[bold green]:frog: ModelHop Setup Wizard[/bold green]\n\n"
             "Configure your API keys to start routing queries.\n"
-            "Press [cyan]Enter[/cyan] to skip any provider you don't have.",
+            "Press [cyan]Enter[/cyan] to skip any provider you don't have.\n"
+            "If a provider's default model is unavailable, you'll be offered alternatives.",
             border_style="green",
             padding=(0, 2),
         )
@@ -173,7 +225,8 @@ def setup() -> None:
         Panel(
             "[bold]:crown: OpenAI (PREMIUM)[/bold]\n"
             "GPT-4 for complex queries. Get a key at [cyan]platform.openai.com[/cyan]\n"
-            "Model: [red]gpt-4[/red] ($0.03/1K tokens)",
+            "Model: [red]gpt-4[/red] ($0.03/1K tokens)\n"
+            "Note: OpenAI needs prepaid credits - without them every model fails.",
             title="Provider 3 of 3",
             border_style="yellow",
             padding=(0, 1),
@@ -196,47 +249,90 @@ def setup() -> None:
         console.print()
         return
 
-    _save_env(keys)
-    _update_config_models(keys)
-    _load_env_file()
-
     console.print("[bold]Testing connections...[/bold]\n")
 
+    order = [("groq", "GROQ_API_KEY"), ("gemini", "GEMINI_API_KEY"), ("openai", "OPENAI_API_KEY")]
+    connected: dict = {}
+    skipped: dict = {}
+    save_keys: dict = {}
+    purge_env: list = []
+    purge_models: list = []
     results = []
-    any_success = False
 
-    if "GROQ_API_KEY" in keys:
-        ok = asyncio.run(_test_connection("groq", keys["GROQ_API_KEY"], "qwen/qwen3.8-27b"))
-        status = (
-            "[green]:white_check_mark: Connected[/green]"
-            if ok
-            else "[red]:x: Failed - check your key[/red]"
-        )
-        results.append(f"  Groq   : {status}")
-        if ok:
-            any_success = True
+    for provider, env_name in order:
+        if env_name not in keys:
+            continue
+        label = PROVIDER_LABELS[provider]
+        api_key = keys[env_name]
+        configured = _configured_model(provider) or PROVIDER_DEFAULT_MODELS[provider]
 
-    if "GEMINI_API_KEY" in keys:
-        ok = asyncio.run(_test_connection("gemini", keys["GEMINI_API_KEY"], "gemini-3.6-flash"))
-        status = (
-            "[green]:white_check_mark: Connected[/green]"
-            if ok
-            else "[red]:x: Failed - check your key[/red]"
-        )
-        results.append(f"  Gemini : {status}")
+        ok, kind, detail = asyncio.run(test_connection(provider, api_key, configured))
         if ok:
-            any_success = True
+            connected[provider] = configured
+            save_keys[env_name] = api_key
+            results.append(
+                f"  {label:<7}: [green]:white_check_mark: Connected ({configured})[/green]"
+            )
+            continue
 
-    if "OPENAI_API_KEY" in keys:
-        ok = asyncio.run(_test_connection("openai", keys["OPENAI_API_KEY"], "gpt-4"))
-        status = (
-            "[green]:white_check_mark: Connected[/green]"
-            if ok
-            else "[red]:x: Failed - check your key[/red]"
-        )
-        results.append(f"  OpenAI : {status}")
-        if ok:
-            any_success = True
+        # Failed: show the real reason, then offer model alternatives
+        # (except when the key itself is rejected or the network is down).
+        if kind == "invalid_key":
+            purge_env.append(env_name)
+            results.append(f"  {label:<7}: [red]:x: Failed - {detail}[/red]")
+            continue
+        if kind == "network":
+            # Transient: keep the key and existing config for the next run.
+            save_keys[env_name] = api_key
+            results.append(f"  {label:<7}: [red]:x: Failed - {detail}[/red]")
+            continue
+
+        console.print(f"  {label} default model failed: [red]{detail}[/red]")
+        tried: list = [(configured, detail)]
+        worked = None
+        if click.confirm(f"  Try a different {label} model?", default=False):
+            worked, catalog_tried = _probe_alternatives(provider, api_key, configured)
+            tried.extend(catalog_tried)
+            if worked is None and click.confirm(
+                f"  Enter a {label} model id manually?", default=False
+            ):
+                for _ in range(3):
+                    manual = input(f"  {label} model id (or Enter to stop): ").strip()
+                    if not manual:
+                        break
+                    ok_m, _kind_m, detail_m = asyncio.run(
+                        test_connection(provider, api_key, manual)
+                    )
+                    tried.append((manual, detail_m))
+                    if ok_m:
+                        worked = manual
+                        break
+            if worked:
+                connected[provider] = worked
+                save_keys[env_name] = api_key
+                results.append(
+                    f"  {label:<7}: [green]:white_check_mark: " f"Connected ({worked})[/green]"
+                )
+                continue
+            tried_str = "; ".join(f"{m}: {d}" for m, d in tried)
+            console.print(f"  [dim]Tried: {tried_str}[/dim]")
+            skipped[provider] = detail
+            purge_env.append(env_name)
+            purge_models.append(provider)
+            results.append(f"  {label:<7}: [yellow]:warning: Skipped - not configured[/yellow]")
+        else:
+            skipped[provider] = detail
+            purge_env.append(env_name)
+            purge_models.append(provider)
+            results.append(f"  {label:<7}: [yellow]:warning: Skipped - not configured[/yellow]")
+
+    _save_env(save_keys)
+    _remove_env_keys(purge_env)
+    if connected and _ensure_config_exists():
+        console.print("[dim]Created modelhop.yaml with defaults.[/dim]\n")
+    _update_config_models(connected)
+    _remove_config_models(purge_models)
+    _load_env_file()
 
     console.print(
         Panel(
@@ -248,7 +344,7 @@ def setup() -> None:
     )
     console.print()
 
-    if not any_success:
+    if not connected:
         console.print(
             Panel(
                 "[bold red]:x: No valid API keys![/bold red]\n\n"

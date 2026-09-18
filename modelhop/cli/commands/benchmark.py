@@ -3,13 +3,13 @@ import json as json_mod
 from pathlib import Path
 
 import click
-from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from ...tracking.cost_tracker import estimate_cost
+from ..display import get_console
 
-console = Console()
+console = get_console()
 
 
 @click.command()
@@ -171,7 +171,7 @@ async def _benchmark_async(query_count: int, json_output: bool) -> None:
     }
 
     if json_output:
-        console.print(json_mod.dumps(results, indent=2))
+        print(json_mod.dumps(results, indent=2))  # noqa: T201 - raw JSON, no rich wrap
     else:
         from modelhop.cli.output import print_benchmark_results, print_distribution
 

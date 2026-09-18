@@ -1,0 +1,42 @@
+{
+  "openapi": "3.0.0",
+  "info": { "title": "ModelHop", "version": "1.1.0" },
+  "paths": {
+    "/v1/chat/completions": {
+      "post": {
+        "summary": "OpenAI-compatible chat completions with model=auto routing",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": { "type": "string" },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "role": { "type": "string" },
+                        "content": { "type": "string" }
+                      }
+                    }
+                  },
+                  "stream": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Completion" } }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "summary": "List routable models",
+        "responses": { "200": { "description": "Model list" } }
+      }
+    }
+  }
+}

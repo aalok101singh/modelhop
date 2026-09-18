@@ -1,13 +1,12 @@
 import json as json_mod
 
 import click
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from ..display import tier_color
+from ..display import get_console, tier_color
 
-console = Console()
+console = get_console()
 
 
 @click.command()
@@ -32,11 +31,13 @@ def history(limit: int, json_output: bool) -> None:
                     "confidence": entry.confidence.score,
                     "cost": entry.cost.actual_cost,
                     "savings": entry.cost.savings,
+                    "tokens_in": entry.cost.tokens_in,
+                    "tokens_out": entry.cost.tokens_out,
                     "latency_ms": entry.total_latency_ms,
                     "fallback_used": entry.fallback_used,
                 }
             )
-        console.print(json_mod.dumps(output, indent=2))
+        print(json_mod.dumps(output, indent=2))  # noqa: T201 - raw JSON, no rich wrap
     else:
         if not entries:
             console.print()

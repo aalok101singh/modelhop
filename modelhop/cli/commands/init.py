@@ -2,10 +2,11 @@ import os
 from pathlib import Path
 
 import click
-from rich.console import Console
 from rich.panel import Panel
 
-console = Console(force_terminal=True)
+from ..display import get_console
+
+console = get_console(force_terminal=True)
 
 
 @click.command()

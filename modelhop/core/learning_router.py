@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
@@ -27,10 +29,12 @@ class LearningRouter:
         models: List[ModelConfig],
         memory: ExperienceMemory,
         performance: PerformanceTracker,
+        trust_policy: dict | None = None,
     ):
         self.models = models
         self.memory = memory
         self.performance = performance
+        self.trust_policy: dict = dict(trust_policy or {})
         self.feature_extractor = FeatureExtractor()
         self._model_map = {m.name: m for m in models}
         self._sort_models()
@@ -48,23 +52,50 @@ class LearningRouter:
         self,
         analysis: QueryAnalysis,
         query_features: Optional[QueryFeatures] = None,
+        trust_required: dict | None = None,
     ) -> Tuple[RoutingDecision, str]:
+        from .trust import TrustViolation, filter_by_trust
+
         reasoning_parts = []
+        eligible, excluded = filter_by_trust(self.models, self.trust_policy, trust_required)
+        if not eligible:
+            raise TrustViolation(
+                "No model satisfies trust policy" + (f": {'; '.join(excluded)}" if excluded else "")
+            )
+        # Narrow candidate set for all downstream stages.
+        _orig_models = self.models
+        _orig_map = self._model_map
+        self.models = eligible
+        self._model_map = {m.name: m for m in eligible}
+        try:
+            enhanced_analysis = self._enhance_analysis(analysis, query_features, reasoning_parts)
+            if trust_required or self.trust_policy:
+                reasoning_parts.append("Trust constraints applied")
 
-        enhanced_analysis = self._enhance_analysis(analysis, query_features, reasoning_parts)
+            experience_decision = self._experience_based_route(
+                enhanced_analysis, query_features, reasoning_parts
+            )
+            if experience_decision is not None:
+                experience_decision.constraints_applied = list((trust_required or {}).keys()) + (
+                    ["trust_policy"] if self.trust_policy else []
+                )
+                return experience_decision, " | ".join(reasoning_parts)
 
-        experience_decision = self._experience_based_route(
-            enhanced_analysis, query_features, reasoning_parts
-        )
-        if experience_decision is not None:
-            return experience_decision, " | ".join(reasoning_parts)
+            capability_decision = self._capability_aware_route(enhanced_analysis, reasoning_parts)
+            if capability_decision is not None:
+                capability_decision.constraints_applied = list((trust_required or {}).keys()) + (
+                    ["trust_policy"] if self.trust_policy else []
+                )
+                return capability_decision, " | ".join(reasoning_parts)
 
-        capability_decision = self._capability_aware_route(enhanced_analysis, reasoning_parts)
-        if capability_decision is not None:
-            return capability_decision, " | ".join(reasoning_parts)
-
-        decision = self._complexity_based_route(enhanced_analysis, reasoning_parts)
-        return decision, " | ".join(reasoning_parts)
+            decision = self._complexity_based_route(enhanced_analysis, reasoning_parts)
+            decision.constraints_applied = list((trust_required or {}).keys()) + (
+                ["trust_policy"] if self.trust_policy else []
+            )
+            return decision, " | ".join(reasoning_parts)
+        finally:
+            self.models = _orig_models
+            self._model_map = _orig_map
 
     def _enhance_analysis(
         self,

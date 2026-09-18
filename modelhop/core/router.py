@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import List
 
 from .models import ModelConfig, QueryAnalysis, RoutingDecision, Tier
@@ -6,8 +8,9 @@ PREMIUM_CAPABILITIES = {"coding", "creative", "analysis", "reasoning"}
 
 
 class Router:
-    def __init__(self, models: List[ModelConfig]):
+    def __init__(self, models: List[ModelConfig], trust_policy: dict | None = None):
         self.models = models
+        self.trust_policy: dict = dict(trust_policy or {})
         self._sort_models()
 
     def _sort_models(self) -> None:
@@ -16,10 +19,20 @@ class Router:
             key=lambda m: (tier_order.get(m.tier, 3), m.cost_per_1k_input + m.cost_per_1k_output)
         )
 
-    def route(self, analysis: QueryAnalysis) -> RoutingDecision:
+    def route(self, analysis: QueryAnalysis, trust_required: dict | None = None) -> RoutingDecision:
+        from .trust import TrustViolation, filter_by_trust
+
+        eligible, excluded = filter_by_trust(self.models, self.trust_policy, trust_required)
+        if not eligible:
+            raise TrustViolation(
+                "No model satisfies trust policy" + (f": {'; '.join(excluded)}" if excluded else "")
+            )
         capable_models = [
-            m for m in self.models if self._has_capabilities(m, analysis.capabilities_needed)
+            m for m in eligible if self._has_capabilities(m, analysis.capabilities_needed)
         ]
+        constraints = list((trust_required or {}).keys()) + (
+            ["trust_policy"] if self.trust_policy else []
+        )
 
         needs_premium = self._needs_premium_model(analysis)
 
@@ -30,18 +43,26 @@ class Router:
                 alternatives = [m for m in capable_models if m.name != selected.name][:2]
                 reason = self._build_reason(analysis, selected)
                 return RoutingDecision(
-                    model=selected, tier=selected.tier, reason=reason, alternatives=alternatives
+                    model=selected,
+                    tier=selected.tier,
+                    reason=reason,
+                    alternatives=alternatives,
+                    constraints_applied=constraints,
                 )
 
         if not capable_models:
-            capable_models = self.models
+            capable_models = eligible
 
         selected = self._select_by_complexity(analysis, capable_models)
         alternatives = [m for m in capable_models if m.name != selected.name][:2]
         reason = self._build_reason(analysis, selected)
 
         return RoutingDecision(
-            model=selected, tier=selected.tier, reason=reason, alternatives=alternatives
+            model=selected,
+            tier=selected.tier,
+            reason=reason,
+            alternatives=alternatives,
+            constraints_applied=constraints,
         )
 
     def _needs_premium_model(self, analysis: QueryAnalysis) -> bool:

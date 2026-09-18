@@ -1,0 +1,161 @@
+"""FastAPI OpenAI-compatible server (v1.1 W2).
+
+- POST /v1/chat/completions (OpenAI schema, SSE streaming, model="auto")
+- GET /v1/models
+- Bearer auth from secrets; body size limits; rate limiting.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from collections import defaultdict
+from typing import Optional
+
+MAX_BODY_BYTES = 256 * 1024
+RATE_LIMIT_PER_MIN = 120
+
+# Module-level import: FastAPI resolves handler annotations (Request, Header)
+# via module globals. A function-local import leaves ForwardRef('Request')
+# unresolvable (this file uses `from __future__ import annotations`), which
+# makes every request fail validation with 422.
+try:
+    from fastapi import FastAPI, Header, HTTPException, Request  # type: ignore
+    from fastapi.responses import StreamingResponse  # type: ignore
+
+    _FASTAPI_AVAILABLE = True
+except ImportError:  # pragma: no cover - server extra not installed
+    FastAPI = Header = HTTPException = Request = StreamingResponse = None  # type: ignore
+    _FASTAPI_AVAILABLE = False
+
+
+def create_app(mh=None):
+    if not _FASTAPI_AVAILABLE:
+        raise ImportError("Server extra required: pip install modelhop[server]")
+
+    from modelhop.core.secrets import EnvSecretsProvider
+
+    if mh is None:
+        from modelhop import ModelHop
+
+        mh = ModelHop()
+    secrets = getattr(mh, "secrets", None) or EnvSecretsProvider()
+    app = FastAPI(title="ModelHop", version="1.1.0")
+    _hits: dict = defaultdict(list)
+
+    def _check_auth(authorization: Optional[str] = Header(default=None)):
+        expected = None
+        try:
+            expected = secrets.get("MODELHOP_API_KEY") or secrets.get("OPENAI_API_KEY")
+        except Exception:
+            expected = None
+        # If no server key configured, allow (single-user local default).
+        if not expected:
+            return True
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing bearer token")
+        token = authorization[len("Bearer ") :].strip()
+        if token != expected:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return True
+
+    def _rate_limit(request: Request):
+        key = request.client.host if request.client else "anon"
+        now = time.time()
+        window = [t for t in _hits[key] if now - t < 60]
+        _hits[key] = window
+        if len(window) >= RATE_LIMIT_PER_MIN:
+            raise HTTPException(status_code=429, detail="Rate limited")
+        window.append(now)
+        _hits[key] = window
+
+    @app.get("/v1/models")
+    async def list_models(request: Request, authorization: Optional[str] = Header(default=None)):
+        _check_auth(authorization)
+        _rate_limit(request)
+        data = [
+            {"id": m.name, "object": "model", "owned_by": m.provider, "tier": m.tier.value}
+            for m in mh.models
+        ]
+        return {"object": "list", "data": data}
+
+    @app.post("/v1/chat/completions")
+    async def chat_completions(
+        request: Request, authorization: Optional[str] = Header(default=None)
+    ):
+        _check_auth(authorization)
+        _rate_limit(request)
+        body = await request.body()
+        if len(body) > MAX_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="Request body too large")
+        try:
+            payload = json.loads(body.decode("utf-8") or "{}")
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise HTTPException(status_code=400, detail="Invalid JSON")
+        messages = payload.get("messages", [])
+        if not isinstance(messages, list) or not messages:
+            raise HTTPException(status_code=400, detail="messages required")
+        # Concatenate user messages as the query.
+        query = " ".join(
+            str(m.get("content", ""))
+            for m in messages
+            if isinstance(m, dict) and m.get("role") in ("user", "system")
+        ).strip() or str(messages[-1].get("content", ""))
+        model_req = str(payload.get("model", "auto"))
+        stream = bool(payload.get("stream", False))
+
+        if model_req != "auto":
+            # Explicit-model passthrough.
+            provider = mh.registry.get_provider(model_req)
+            cfg = mh.registry.get_model(model_req)
+            if provider is None or cfg is None:
+                raise HTTPException(status_code=404, detail=f"Model {model_req} not found")
+            try:
+                resp = await provider.generate(query)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc))
+            content = resp.content
+            model_name = cfg.name
+        else:
+            try:
+                result = await mh.route(query)
+            except RuntimeError as exc:
+                raise HTTPException(
+                    status_code=403 if "refused" in str(exc).lower() else 502, detail=str(exc)
+                )
+            content = result.response
+            model_name = result.model
+
+        if not stream:
+            return {
+                "id": f"chatcmpl-{int(time.time()*1000)}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": model_name,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": content},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            }
+
+        async def _gen():
+            chunk_id = f"chatcmpl-{int(time.time()*1000)}"
+            # SSE streaming in small chunks.
+            for i in range(0, len(content), 200):
+                piece = content[i : i + 200]
+                yield f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': model_name, 'choices': [{'index': 0, 'delta': {'content': piece}, 'finish_reason': None}]})}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(_gen(), media_type="text/event-stream")
+
+    return app
+
+
+try:
+    app = create_app()
+except Exception:
+    app = None  # Import-time safety when deps/config missing; create_app() works at runtime.
