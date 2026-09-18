@@ -229,9 +229,7 @@ def test_decomposed_tolerates_capability_gap(qmh):
     # 'technical' is in no stock model's capabilities; decomposition must
     # still complete (trust/budget/health stay hard, capability best-effort).
     r = asyncio.run(
-        qmh.route(
-            "Explain photosynthesis in detail and write a Python function to sort a list"
-        )
+        qmh.route("Explain photosynthesis in detail and write a Python function to sort a list")
     )
     assert r.response and r.model
 
