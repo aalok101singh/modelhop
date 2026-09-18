@@ -107,12 +107,14 @@ class _Judge:
 
 async def test_rubric_sync_skips():
     out = RubricVerifier().verify("q", "r")
-    assert out.passed is True
+    assert out.passed is False
+    assert out.details.get("note") == "sync skip"
 
 
 async def test_rubric_no_provider_skips():
     out = await RubricVerifier().averify("q", "r")
-    assert out.passed is True
+    assert out.passed is False
+    assert out.details.get("note") == "no judge; skipped"
 
 
 async def test_rubric_judge_pass_and_fail():

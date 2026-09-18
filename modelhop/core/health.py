@@ -49,7 +49,8 @@ class CircuitBreaker:
             opened = self._opened_at.get(key, 0.0)
             if (time.monotonic() - opened) >= self.recovery_timeout_s:
                 self._state[key] = CircuitState.HALF_OPEN
-                self._half_open_inflight[key] = 0
+                # The opening probe counts against the budget.
+                self._half_open_inflight[key] = 1
                 return True
             return False
         # HALF_OPEN: allow bounded probes.

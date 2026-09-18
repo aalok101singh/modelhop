@@ -20,6 +20,17 @@ PROVIDER_KEY_ENVS = {
 }
 
 
+def _line_key(line: str) -> str:
+    """Assignment key before the first `=`, honoring `export ` and quotes."""
+    text = line.strip()
+    if text.startswith("export "):
+        text = text[len("export ") :].strip()
+    if text.startswith("#") or "=" not in text:
+        return ""
+    key = text.split("=", 1)[0].strip().strip("\"'")
+    return key
+
+
 def _save_env(keys: dict) -> None:
     lines = []
     if ENV_PATH.exists():
@@ -27,7 +38,7 @@ def _save_env(keys: dict) -> None:
             lines = [
                 line
                 for line in f.readlines()
-                if not any(line.strip().startswith(k) for k in keys if keys[k])
+                if _line_key(line) not in {k for k, v in keys.items() if v}
             ]
 
     for key, value in keys.items():
@@ -41,10 +52,9 @@ def _save_env(keys: dict) -> None:
 def _remove_env_keys(names: list) -> None:
     if not ENV_PATH.exists() or not names:
         return
+    wanted = set(names)
     with open(ENV_PATH, "r") as f:
-        lines = [
-            line for line in f.readlines() if not any(line.strip().startswith(n) for n in names)
-        ]
+        lines = [line for line in f.readlines() if _line_key(line) not in wanted]
     with open(ENV_PATH, "w") as f:
         f.writelines(lines)
 

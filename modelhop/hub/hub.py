@@ -29,11 +29,24 @@ class Hub:
         return Path(__file__).parent.parent.parent / "spec" / "config.schema.json"
 
     def _validate_schema(self, data: dict) -> bool:
-        # Minimal structural validation; full JSON-schema when jsonschema installed.
+        # Mandatory structural validation (no optional degradation): every
+        # model entry must carry the fields Config.get_models indexes.
+        # Full JSON-schema runs on top when jsonschema is installed.
         if not isinstance(data, dict):
             return False
-        if "models" in data and not isinstance(data["models"], list):
+        models = data.get("models")
+        if not isinstance(models, list):
             return False
+        for entry in models:
+            if not isinstance(entry, dict):
+                return False
+            for field in ("name", "provider", "model", "tier"):
+                if not entry.get(field) or not isinstance(entry[field], str):
+                    return False
+            if entry["tier"] not in ("free", "mid", "premium"):
+                return False
+            if "capabilities" in entry and not isinstance(entry["capabilities"], list):
+                return False
         try:
             import jsonschema  # type: ignore
 
@@ -119,11 +132,31 @@ class Hub:
                 target = parent / safe_name
             else:
                 base = Path.cwd().resolve()
-                # Strip any directory components; confine to cwd.
-                safe_name = _sanitize_name(Path(dest.name).stem) + (
-                    Path(dest.name).suffix or ".yaml"
-                )
-                target = base / safe_name
+                # Preserve relative subdirectories under cwd (creating
+                # parents), sanitizing each part; reject escapes outside cwd.
+                parts = [p for p in Path(dest).parts if p not in ("", ".", "..")]
+                safe_parts = []
+                for i, part in enumerate(parts):
+                    stem = _sanitize_name(Path(part).stem)
+                    suffix = Path(part).suffix
+                    if i == len(parts) - 1 and not suffix:
+                        suffix = ".yaml"
+                    safe_parts.append(stem + suffix)
+                if not safe_parts:
+                    safe_parts = [_sanitize_name(Path(name).stem) + ".yaml"]
+                target = (base / Path(*safe_parts)).resolve()
+                try:
+                    target.relative_to(base)
+                except ValueError:
+                    # Escapes cwd: fall back to a flat sanitized name.
+                    safe_name = _sanitize_name(Path(dest.name).stem) + (
+                        Path(dest.name).suffix or ".yaml"
+                    )
+                    target = base / safe_name
+                try:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    pass
         except Exception:
             target = Path.cwd() / (_sanitize_name(Path(name).stem) + ".yaml")
         # Re-validate before write.

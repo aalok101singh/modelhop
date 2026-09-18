@@ -12,9 +12,15 @@ from typing import Optional
 
 
 def cache_key(
-    normalized_query: str, model_set_version: str, policy_version: str, tenant: str
+    normalized_query: str,
+    model_set_version: str,
+    policy_version: str,
+    tenant: str,
+    trust_hash: str = "",
 ) -> str:
-    raw = "|".join([normalized_query.strip().lower(), model_set_version, policy_version, tenant])
+    raw = "|".join(
+        [normalized_query.strip().lower(), model_set_version, policy_version, tenant, trust_hash]
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 

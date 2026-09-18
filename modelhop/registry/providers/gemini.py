@@ -38,14 +38,16 @@ class GeminiProvider(BaseProvider):
                 "max_output_tokens": max_tokens,
                 "temperature": temperature,
             }
-            # Tool-call passthrough when the underlying SDK supports it.
-            if tools:
-                gen_kwargs["tools"] = tools
-            gen_kwargs.update(kwargs)
-            return await self.client.generate_content_async(
-                prompt,
-                generation_config=genai.types.GenerationConfig(**gen_kwargs),
-            )
+            extra = dict(kwargs)
+            # `tools` is a request field, not a GenerationConfig field.
+            tools_arg = tools if tools is not None else extra.pop("tools", None)
+            gen_kwargs.update(extra)
+            request_kwargs: dict = {
+                "generation_config": genai.types.GenerationConfig(**gen_kwargs),
+            }
+            if tools_arg:
+                request_kwargs["tools"] = tools_arg
+            return await self.client.generate_content_async(prompt, **request_kwargs)
 
         response = await self._with_retries(_call, timeout_s=timeout_s)
         latency_ms = int((time.time() - start_time) * 1000)

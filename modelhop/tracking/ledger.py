@@ -52,13 +52,14 @@ class DecisionLedger:
         except OSError:
             return
 
-    def _persist_entry(self, entry: dict) -> None:
+    def _persist_entry(self, entry: dict) -> bool:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, default=str) + "\n")
+            return True
         except OSError:
-            pass
+            return False
 
     def append(self, event: dict) -> dict:
         seq = len(self._entries)
@@ -74,8 +75,10 @@ class DecisionLedger:
             "payload": event,
             "mac": mac,
         }
+        # Durability first: never hand out an ID for an unpersisted event.
+        if not self._persist_entry(entry):
+            raise OSError(f"ledger persist failed: {self.path}")
         self._entries.append(entry)
-        self._persist_entry(entry)
         return entry
 
     def verify_chain(self) -> tuple[bool, Optional[int]]:
