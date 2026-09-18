@@ -1,88 +1,83 @@
+"""Append-only JSONL trace logger with atomic compaction (v1.1 W3).
+
+Honest rehydration only: stored TraceEntry dicts are parsed back verbatim.
+No fabricated fields. Optional ledger linkage via ledger_id.
+"""
+
+from __future__ import annotations
+
 import json
+import os
+import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
 from ..core.models import (
-    ComplexityLevel,
     ConfidenceResult,
     CostAnalysis,
-    EmotionalTone,
-    ModelConfig,
     ProviderResponse,
     QueryAnalysis,
     RoutingDecision,
-    Tier,
     TraceEntry,
 )
 
 
 class TraceLogger:
     def __init__(self, log_path: Optional[str] = None):
-        self.log_path = Path(log_path) if log_path else Path("trace_log.json")
+        self.log_path = Path(log_path) if log_path else Path("trace_log.jsonl")
+        # Back-compat: if legacy .json path requested, honor it.
         self.history: List[TraceEntry] = []
         self._load_existing()
 
     def _load_existing(self) -> None:
-        if not self.log_path.exists():
-            return
-        try:
-            with open(self.log_path, "r") as f:
-                log = json.load(f)
-            for entry in log.get("traces", []):
-                trace = TraceEntry(
-                    query_id=entry["query_id"],
-                    query=entry["query"],
-                    timestamp=datetime.fromisoformat(entry["timestamp"]),
-                    analysis=QueryAnalysis(
-                        complexity=entry["complexity"],
-                        level=(
-                            ComplexityLevel.SIMPLE
-                            if entry["complexity"] <= 0.3
-                            else (
-                                ComplexityLevel.MEDIUM
-                                if entry["complexity"] <= 0.6
-                                else ComplexityLevel.COMPLEX
-                            )
-                        ),
-                        capabilities_needed=["general"],
-                        emotional_tone=EmotionalTone.NEUTRAL,
-                    ),
-                    decision=RoutingDecision(
-                        model=ModelConfig(
-                            name=entry["model"],
-                            provider="",
-                            model="",
-                            tier=Tier(entry["tier"]),
-                        ),
-                        tier=Tier(entry["tier"]),
-                        reason="",
-                    ),
-                    response=ProviderResponse(
-                        content="",
-                        model_used=entry["model"],
-                        provider="",
-                    ),
-                    confidence=ConfidenceResult(
-                        score=entry["confidence"],
-                        is_confident=entry["confidence"] >= 0.7,
-                        threshold=0.7,
-                    ),
-                    cost=CostAnalysis(
-                        actual_cost=entry["actual_cost"],
-                        would_have_cost=entry["actual_cost"] + entry["savings"],
-                        savings=entry["savings"],
-                        savings_percentage=0,
-                        model_used=entry["model"],
-                        tier=entry["tier"],
-                    ),
-                    fallback_used=entry.get("fallback_used", False),
-                    total_latency_ms=entry.get("latency_ms", 0),
-                )
-                self.history.append(trace)
-        except Exception:
-            pass
+        # Support both legacy trace_log.json (array envelope) and new JSONL.
+        legacy = Path("trace_log.json")
+        candidates = []
+        if self.log_path.exists():
+            candidates.append(self.log_path)
+        if legacy.exists() and legacy.resolve() != self.log_path.resolve():
+            candidates.append(legacy)
+        for path in candidates:
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            # Try JSONL first.
+            lines_ok = False
+            for line in text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                # JSONL entries are full TraceEntry dicts.
+                if isinstance(obj, dict) and "query_id" in obj and "analysis" in obj:
+                    try:
+                        self.history.append(TraceEntry(**obj))
+                        lines_ok = True
+                    except Exception:
+                        continue
+            if lines_ok:
+                continue
+            # Fall back to legacy envelope {"traces": [...] summary dicts}.
+            # Honest rehydration: legacy summaries lack full fidelity, so we do
+            # NOT fabricate full traces from them. Skip them (no fake entries).
+            # Only migrate if entries already look like full traces.
+            try:
+                envelope = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(envelope, dict) and isinstance(envelope.get("traces"), list):
+                for item in envelope["traces"]:
+                    if isinstance(item, dict) and "analysis" in item and "decision" in item:
+                        try:
+                            self.history.append(TraceEntry(**item))
+                        except Exception:
+                            continue
 
     def log(
         self,
@@ -94,52 +89,59 @@ class TraceLogger:
         cost: CostAnalysis,
         fallback_used: bool = False,
         fallback_count: int = 0,
+        ledger_id: Optional[str] = None,
+        cache_hit: bool = False,
+        degraded: bool = False,
+        policy_version: str = "1",
     ) -> TraceEntry:
+        # Strip raw_response before persistence (never serialized anyway via exclude=True).
+        safe_response = response.model_copy(update={"raw_response": None})
         trace = TraceEntry(
             query_id=str(uuid.uuid4())[:8],
             query=query,
             timestamp=datetime.now(),
             analysis=analysis,
             decision=decision,
-            response=response,
+            response=safe_response,
             confidence=confidence,
             cost=cost,
             fallback_used=fallback_used,
             fallback_count=fallback_count,
             total_latency_ms=response.latency_ms,
+            ledger_id=ledger_id,
+            cache_hit=cache_hit,
+            degraded=degraded or decision.degraded,
+            policy_version=policy_version,
         )
-
         self.history.append(trace)
-        self._save_trace(trace)
+        self._append(trace)
         return trace
 
-    def _save_trace(self, trace: TraceEntry) -> None:
+    def _append(self, trace: TraceEntry) -> None:
         try:
-            if self.log_path.exists():
-                with open(self.log_path, "r") as f:
-                    log = json.load(f)
-            else:
-                log = {"traces": []}
+            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.log_path, "a", encoding="utf-8") as f:
+                f.write(trace.model_dump_json() + "\n")
+        except OSError:
+            pass
 
-            log["traces"].append(
-                {
-                    "query_id": trace.query_id,
-                    "query": trace.query,
-                    "timestamp": trace.timestamp.isoformat(),
-                    "complexity": trace.analysis.complexity,
-                    "model": trace.decision.model.name,
-                    "tier": trace.decision.tier.value,
-                    "confidence": trace.confidence.score,
-                    "actual_cost": trace.cost.actual_cost,
-                    "savings": trace.cost.savings,
-                    "latency_ms": trace.total_latency_ms,
-                    "fallback_used": trace.fallback_used,
-                }
-            )
-
-            with open(self.log_path, "w") as f:
-                json.dump(log, f, indent=2)
-        except Exception:
+    def compact(self) -> None:
+        """Atomically rewrite the log, dropping corrupt lines."""
+        try:
+            directory = str(self.log_path.parent) or "."
+            fd, tmp_path = tempfile.mkstemp(suffix=".tmp", dir=directory)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    for trace in self.history:
+                        f.write(trace.model_dump_json() + "\n")
+                os.replace(tmp_path, str(self.log_path))
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+        except OSError:
             pass
 
     def get_history(self, limit: int = 20) -> List[TraceEntry]:

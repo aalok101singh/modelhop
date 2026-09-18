@@ -1,10 +1,11 @@
 import json as json_mod
 
 import click
-from rich.console import Console
 from rich.panel import Panel
 
-console = Console()
+from ..display import get_console
+
+console = get_console()
 
 
 @click.group(invoke_without_command=True)
@@ -34,7 +35,7 @@ def status(json_output: bool) -> None:
             "adjustments_today": shield_status.adjustments_today,
             "recommendations": recommendations,
         }
-        console.print(json_mod.dumps(output, indent=2))
+        print(json_mod.dumps(output, indent=2))  # noqa: T201 - raw JSON, no rich wrap
     else:
         active_color = "green" if shield_status.active else "red"
         active_icon = ":white_check_mark:" if shield_status.active else ":x:"

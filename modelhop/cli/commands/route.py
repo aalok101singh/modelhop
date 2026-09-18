@@ -1,15 +1,13 @@
 import asyncio
+import json as json_mod
 
 import click
-from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from ..._version import get_version
-from ...tracking.cost_tracker import estimate_cost
-from ..display import tier_color, tier_emoji
+from ..display import get_console, tier_color, tier_emoji
 
-console = Console()
+console = get_console()
 
 
 @click.command()
@@ -43,15 +41,14 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
         console.print()
         return
 
-    if not mh.analyzer.providers:
+    # Relaxed analyzer-provider guard: zero-API heuristic is the default.
+    # Only require a provider when explicit LLM analysis is enabled.
+    if getattr(mh, "llm_analysis", False) and not mh.analyzer.providers:
         console.print()
         console.print(
             Panel(
                 "[bold red]:x: No provider for query analysis![/bold red]\n\n"
-                "Set at least one API key:\n"
-                "  [cyan]$env:GROQ_API_KEY=your-key[/cyan]\n"
-                "  [cyan]$env:GEMINI_API_KEY=your-key[/cyan]\n"
-                "  [cyan]$env:OPENAI_API_KEY=your-key[/cyan]",
+                "LLM analysis is enabled (routing.llm_analysis=true) but no API key is set.",
                 title=":warning: Configuration Error",
                 border_style="red",
             )
@@ -71,385 +68,216 @@ async def _route_async(query: str, verbose: bool, json_output: bool, force_model
         )
         console.print()
 
+    # Baseline label comes from config (no hardcoded GPT-4).
+    baseline_label = "baseline"
     try:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-            transient=True,
-        ) as progress:
-            task = progress.add_task("  :mag: Extracting features...", total=None)
-            query_features = mh.feature_extractor.extract(query)
-            progress.update(task, completed=True)
+        baseline_label = (
+            mh.cost_tracker.price_book.baseline_model_name(mh.models)
+            if getattr(mh.cost_tracker, "price_book", None)
+            else "baseline"
+        )
+    except Exception:
+        pass
 
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-            transient=True,
-        ) as progress:
-            task = progress.add_task("  :brain: Analyzing query...", total=None)
+    try:
+        # Thin shell over the SDK brain. Forced model uses the simple router path.
+        if force_model:
+
+            features = mh.feature_extractor.extract(query)
             analysis = await mh.analyzer.analyze(query)
-            progress.update(task, completed=True)
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-            transient=True,
-        ) as progress:
-            task = progress.add_task("  :dart: Learning routing decision...", total=None)
-            if force_model:
-                decision = mh.router.route_with_model(force_model, analysis)
-                reasoning = f"Forced model selection: {force_model}"
-            else:
-                decision, reasoning = mh.learning_router.route(analysis, query_features)
-            progress.update(task, completed=True)
-
-        if not json_output:
-            console.print("  :mag: [bold]Feature Extraction[/bold]")
-            console.print(f"     Query Type     : [cyan]{query_features.query_type.value}[/cyan]")
-            console.print(f"     Code Keywords  : {query_features.code_keyword_count}")
-            console.print(f"     Algorithm Terms: {query_features.algorithm_term_count}")
-            if query_features.has_constraints:
-                console.print("     Constraints    : [yellow]detected[/yellow]")
-            if query_features.requires_optimization:
-                console.print("     Optimization   : [yellow]required[/yellow]")
-            console.print()
-
-            console.print("  :brain: [bold]AI Analysis[/bold]")
-            console.print(f"     Base Complexity : [cyan]{analysis.complexity:.2f}[/cyan]")
-            console.print(f"     Capabilities   : {', '.join(analysis.capabilities_needed)}")
-            if analysis.emotional_tone.value != "neutral":
-                console.print(f"     Tone : [yellow]{analysis.emotional_tone.value}[/yellow]")
-            console.print()
-
-            similar = mh.memory.find_similar(query_features, top_k=3, min_similarity=0.4)
-            if similar:
-                console.print("  :books: [bold]Experience Memory[/bold]")
-                console.print(f"     Similar queries found : [cyan]{len(similar)}[/cyan]")
-                avg_q = sum(e.response_quality for e in similar) / len(similar)
-                console.print(f"     Avg historical quality: [cyan]{avg_q:.2f}[/cyan]")
-                models_seen = set(e.model_name for e in similar)
-                console.print(f"     Models tried          : {', '.join(models_seen)}")
-                console.print()
-
-            color = tier_color(decision.tier.value)
-            emoji = tier_emoji(decision.tier.value)
-            console.print("  :dart: [bold]Routing Decision[/bold]")
-            console.print(f"     Model : [bold green]{decision.model.name}[/bold green]")
-            console.print(f"     Tier  : [{color}]{emoji} {decision.tier.value.upper()}[/{color}]")
-            console.print(f"     Reason: {decision.reason}")
-            if reasoning:
-                console.print(f"     Logic : {reasoning}")
-            console.print()
-
-        response = None
-        provider = None
-        fallback_count = 0
-        tried_models = set()
-        original_decision = decision
-        max_retries = mh.fallback.max_retries
-
-        while fallback_count < max_retries + 1:
-            model_name = decision.model.name
-            tried_models.add(model_name)
-
-            provider = mh.registry.get_provider(model_name)
+            decision = mh.router.route_with_model(force_model, analysis)
+            # Generate directly via the forced provider, then wrap as RouteResult.
+            provider = mh.registry.get_provider(decision.model.name)
             if provider is None:
-                if not json_output:
-                    console.print(
-                        f"  :warning: [yellow]Provider not available for {model_name}, trying next...[/yellow]"
-                    )
-                next_decision = _get_next_fallback(mh, decision, tried_models)
-                if next_decision is None:
-                    break
-                decision = next_decision
-                fallback_count += 1
-                continue
+                raise RuntimeError(f"Provider not available for {force_model}")
+            raw = await provider.generate(query)
 
-            try:
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    console=console,
-                    transient=True,
-                ) as progress:
-                    task = progress.add_task("  :zap: Generating response...", total=None)
-                    response = await provider.generate(query)
-                    progress.update(task, completed=True)
-                break
-            except Exception as e:
-                error_msg = str(e)
-                if not json_output:
-                    console.print(
-                        f"  :warning: [yellow]{model_name} failed: {_short_error(error_msg)}[/yellow]"
-                    )
-                    console.print("  :arrow_right: [dim]Falling back to next model...[/dim]")
-                next_decision = _get_next_fallback(mh, decision, tried_models)
-                if next_decision is None:
-                    break
-                decision = next_decision
-                fallback_count += 1
-
-        if response is None:
-            if json_output:
-                console.print('{"error": "All models failed"}')
-            else:
-                console.print(
-                    Panel(
-                        "[bold red]:x: All models failed![/bold red]\n\n"
-                        "No provider could handle this query.\n"
-                        "Check your API keys and model configuration.",
-                        title=":warning: Routing Failed",
-                        border_style="red",
-                    )
-                )
-            return
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-            transient=True,
-        ) as progress:
-            task = progress.add_task("  :mag: Checking confidence...", total=None)
-            consensus_provider = _get_consensus_provider(mh, decision.model.name)
-            confidence = await mh.confidence_engine.check(
-                query, response, provider, consensus_provider, query_features
+            conf = await mh.confidence_engine.check(
+                query, raw, provider=None, query_features=features
             )
-            progress.update(task, completed=True)
+            cost = mh._route_cost(raw, decision.model, conf)
+            from modelhop.core.models import RouteResult
 
-        conf_fallback_count = 0
-        while not confidence.is_confident and conf_fallback_count < max_retries:
-            fallback_decision = await mh.fallback.handle_low_confidence(
-                query, analysis, decision.model, confidence
-            )
-            if fallback_decision is None:
-                break
-
-            decision = fallback_decision
-            fallback_provider = mh.registry.get_provider(decision.model.name)
-            if fallback_provider is None:
-                break
-            provider = fallback_provider
-            try:
-                response = await provider.generate(query)
-            except Exception:
-                break
-            confidence = await mh.confidence_engine.check(
-                query, response, provider, query_features=query_features
-            )
-            conf_fallback_count += 1
-
-        tracking = mh.config.get_tracking_config()
-        log_queries = tracking.get("log_queries", True)
-        log_costs = tracking.get("log_costs", True)
-
-        if log_queries:
-            mh.memory.record(
-                query=query,
-                query_features=query_features,
-                analysis=analysis,
-                decision=decision,
-                response_quality=confidence.score,
-                fallback_used=fallback_count > 0 or conf_fallback_count > 0,
-                latency_ms=response.latency_ms,
-            )
-            mh.performance.record_outcome(
-                model_name=decision.model.name,
-                query_type=query_features.query_type,
-                quality=confidence.score,
-                latency_ms=response.latency_ms,
-                fallback_used=fallback_count > 0 or conf_fallback_count > 0,
-            )
-            mh.adaptive_threshold.adjust(confidence.score)
-
-        if log_costs:
-            cost = mh.cost_tracker.calculate(response, decision.model)
-        else:
-            cost = estimate_cost(response, decision.model)
-
-        if log_queries:
-            trace = mh.trace_logger.log(
-                query=query,
-                analysis=analysis,
-                decision=decision,
-                response=response,
-                confidence=confidence,
+            result = RouteResult(
+                response=raw.content,
+                model=decision.model.name,
+                tier=decision.tier.value,
+                reasoning=f"Forced model selection: {force_model}",
+                confidence=conf,
                 cost=cost,
-                fallback_count=fallback_count + conf_fallback_count,
+                candidates=[],
+                degraded=False,
+                cached=False,
+                trust=decision.model.trust,
+                verifier=None,
+                ledger_id="",
             )
+            try:
+                object.__setattr__(result, "_provider_response", raw)
+            except Exception:
+                pass
+        else:
+            result = await mh.route(query)
 
-            mh.shield.check_quality(trace)
-            mh.hop_score.update(confidence.is_confident)
-
-        if fallback_count > 0 and not json_output:
-            console.print(
-                f"  :recycle: [yellow]Fell back from {original_decision.model.name} to {decision.model.name}[/yellow]"
-            )
-            console.print()
-
+        # JSON output keeps all flags valid.
         if json_output:
-            import json
-
             output = {
                 "query": query,
-                "features": {
-                    "query_type": query_features.query_type.value,
-                    "code_keywords": query_features.code_keyword_count,
-                    "algorithm_terms": query_features.algorithm_term_count,
-                    "has_constraints": query_features.has_constraints,
-                },
-                "complexity": analysis.complexity,
-                "model": decision.model.name,
-                "tier": decision.tier.value,
-                "reasoning": reasoning,
-                "response": response.content,
-                "confidence": confidence.score,
-                "cost": cost.actual_cost,
-                "savings": cost.savings,
-                "latency_ms": response.latency_ms,
-                "fallback_count": fallback_count + conf_fallback_count,
+                "model": result.model,
+                "tier": result.tier,
+                "reasoning": result.reasoning,
+                "response": result.response,
+                "confidence": result.confidence.score,
+                "confidence_method": result.confidence.method,
+                "calibrated": result.confidence.calibrated,
+                "cost": result.cost.actual_cost,
+                "would_have_cost": result.cost.would_have_cost,
+                "savings": result.cost.savings,
+                "savings_percentage": result.cost.savings_percentage,
+                "tokens_in": result.cost.tokens_in,
+                "tokens_out": result.cost.tokens_out,
+                "baseline_model": result.cost.baseline_model or baseline_label,
+                "aux_calls": result.cost.aux_calls,
+                "aux_cost": result.cost.aux_cost,
+                "latency_ms": result.latency_ms,
+                "degraded": result.degraded,
+                "cached": result.cached,
+                "trust": result.trust.model_dump() if hasattr(result.trust, "model_dump") else {},
+                "verifier": result.verifier.model_dump() if result.verifier else None,
+                "ledger_id": result.ledger_id,
                 "hop_score": mh.hop_score.get_stats(),
             }
-            console.print(json.dumps(output, indent=2))
-        else:
-            console.print(
-                Panel(
-                    response.content,
-                    title=":bulb: Response",
-                    border_style="cyan",
-                    padding=(0, 1),
-                )
+            print(json_mod.dumps(output, indent=2))  # noqa: T201 - raw JSON, no rich wrap
+            return
+
+        # Rich panels.
+        console.print(
+            Panel(result.response, title=":bulb: Response", border_style="cyan", padding=(0, 1))
+        )
+        console.print()
+        # Badges: cached, verified, degraded, trust ZDR.
+        badges = []
+        if result.cached:
+            badges.append("[cyan]cached[/cyan]")
+        if result.verifier is not None:
+            badges.append(
+                "[green]verified[/green]" if result.verifier.passed else "[red]unverified[/red]"
             )
+        if result.degraded:
+            badges.append(
+                "[yellow]:warning: degraded - low confidence "
+                f"({result.confidence.score:.2f} < {result.confidence.threshold:.2f}); "
+                "used safest fallback[/yellow]"
+            )
+        try:
+            if getattr(result.trust, "zdr", False):
+                badges.append("[magenta]trust: ZDR[/magenta]")
+        except Exception:
+            pass
+        if badges:
+            console.print("  " + " · ".join(badges))
             console.print()
 
-            savings_pct = cost.savings_percentage
+        cost = result.cost
+        savings_pct = cost.savings_percentage
+        saved_something = cost.savings > 0
+        no_baseline = cost.would_have_cost <= 0
+        if no_baseline:
+            saved_line = "[dim]:sparkles: You saved:                 " "n/a (free tier only)[/dim]"
+            badge = (
+                "[dim]No priced baseline - add a premium model "
+                "(modelhop setup) to measure savings[/dim]"
+            )
+        else:
+            saved_line = (
+                "[bold bright_green]:sparkles: You saved:                 "
+                f"${cost.savings:.4f} ({cost.savings_percentage:.0f}%)[/bold bright_green]"
+            )
             if savings_pct >= 90:
-                badge = "[bold green]:tada: AMAZING SAVINGS[/bold green]"
+                badge = "[bold bright_green]:tada: AMAZING SAVINGS[/bold bright_green]"
             elif savings_pct >= 50:
                 badge = "[bold yellow]:heavy_check_mark: GREAT SAVINGS[/bold yellow]"
             else:
                 badge = "[dim]Some savings[/dim]"
+        total_tokens = cost.tokens_in + cost.tokens_out
+        console.print(
+            Panel(
+                f"[green]:moneybag: Actual cost:               ${cost.actual_cost:.4f}[/green]\n"
+                f"[red]:x: Would cost ({cost.baseline_model or baseline_label}):  ${cost.would_have_cost:.4f}[/red]\n"
+                f"{saved_line}\n"
+                f"[cyan]:brain: Tokens:                     {cost.tokens_in} in / {cost.tokens_out} out ({total_tokens} total)[/cyan]\n"
+                f"{badge}",
+                title=":money_with_wings: Cost Analysis",
+                border_style="green" if saved_something else "yellow",
+                padding=(0, 1),
+            )
+        )
+        console.print()
 
+        hop = mh.hop_score.get_stats()
+        score = hop["score"]
+        if score >= 90:
+            score_color, rating_emoji = "green", ":star:"
+        elif score >= 70:
+            score_color, rating_emoji = "yellow", ":thumbsup:"
+        elif score >= 50:
+            score_color, rating_emoji = "white", ":mega:"
+        else:
+            score_color, rating_emoji = "red", ":warning:"
+        console.print("  :frog: [bold]Hop Score[/bold]")
+        console.print(f"     Score   : [{score_color}]{score}/100[/{score_color}] {rating_emoji}")
+        console.print(f"     Rating  : [{score_color}]{hop['rating']}[/{score_color}]")
+        console.print(
+            f"     Queries : [cyan]{hop['total_queries']}[/cyan] total, [cyan]{hop['optimal_routes']}[/cyan] optimal"
+        )
+        console.print()
+
+        if verbose:
+            explanation = mh.explain(result)
+            console.print(
+                Panel(explanation, title=":thought_balloon: Routing Rationale", border_style="cyan")
+            )
+            console.print()
+            stats = mh.memory.get_overall_stats()
+            perf_stats = mh.adaptive_threshold.get_stats()
             console.print(
                 Panel(
-                    f"[green]:moneybag: Actual cost:          ${cost.actual_cost:.4f}[/green]\n"
-                    f"[red]:x: Would cost (GPT-4):  ${cost.would_have_cost:.4f}[/red]\n"
-                    f"[bold green]:sparkles: You saved:            ${cost.savings:.4f} ({cost.savings_percentage:.0f}%)[/bold green]\n"
-                    f"{badge}",
-                    title=":money_with_wings: Cost Analysis",
-                    border_style="yellow",
+                    f"[bold]Intelligence Stats[/bold]\n"
+                    f"  Total experiences   : {stats['total']}\n"
+                    f"  Avg quality         : {stats['avg_quality']:.2f}\n"
+                    f"  Fallback rate       : {stats['fallback_rate']:.0%}\n"
+                    f"  Confidence threshold: {perf_stats['threshold']:.3f}\n"
+                    f"  Quality trend       : {perf_stats['trend']}\n"
+                    f"  Hop Score           : {hop['score']}/100 ({hop['rating']})",
+                    title=":brain: System Intelligence",
+                    border_style="magenta",
                     padding=(0, 1),
                 )
             )
             console.print()
 
-            hop = mh.hop_score.get_stats()
-            score = hop["score"]
-            if score >= 90:
-                score_color = "green"
-                rating_emoji = ":star:"
-            elif score >= 70:
-                score_color = "yellow"
-                rating_emoji = ":thumbsup:"
-            elif score >= 50:
-                score_color = "white"
-                rating_emoji = ":mega:"
-            else:
-                score_color = "red"
-                rating_emoji = ":warning:"
-            console.print("  :frog: [bold]Hop Score[/bold]")
-            console.print(
-                f"     Score   : [{score_color}]{score}/100[/{score_color}] {rating_emoji}"
-            )
-            console.print(f"     Rating  : [{score_color}]{hop['rating']}[/{score_color}]")
-            console.print(
-                f"     Queries : [cyan]{hop['total_queries']}[/cyan] total, [cyan]{hop['optimal_routes']}[/cyan] optimal"
-            )
-            console.print()
-
-            if verbose:
-                stats = mh.memory.get_overall_stats()
-                perf_stats = mh.adaptive_threshold.get_stats()
-                hop = mh.hop_score.get_stats()
-                explanation = mh.reasoning_engine.explain(
-                    query=query,
-                    analysis=analysis,
-                    decision=decision,
-                    query_features=query_features,
-                    merged_reasoning=reasoning,
-                )
-                console.print(
-                    Panel(
-                        explanation,
-                        title=":thought_balloon: Routing Rationale",
-                        border_style="cyan",
-                    )
-                )
-                console.print()
-                console.print(
-                    Panel(
-                        f"[bold]Intelligence Stats[/bold]\n"
-                        f"  Total experiences   : {stats['total']}\n"
-                        f"  Avg quality         : {stats['avg_quality']:.2f}\n"
-                        f"  Fallback rate       : {stats['fallback_rate']:.0%}\n"
-                        f"  Confidence threshold: {perf_stats['threshold']:.3f}\n"
-                        f"  Quality trend       : {perf_stats['trend']}\n"
-                        f"  Hop Score           : {hop['score']}/100 ({hop['rating']})",
-                        title=":brain: System Intelligence",
-                        border_style="magenta",
-                        padding=(0, 1),
-                    )
-                )
-                console.print()
-
-            if response.latency_ms < 500:
-                lcolor = "green"
-                lrating = ":rocket: Blazing fast!"
-            elif response.latency_ms < 1000:
-                lcolor = "yellow"
-                lrating = ":thumbsup: Fast"
-            else:
-                lcolor = "white"
-                lrating = ":clock1: Good"
-            console.print(
-                f"  :frog: Hopped in [bold {lcolor}]{response.latency_ms}ms[/bold {lcolor}]  {lrating}"
-            )
-            console.print()
+        color = tier_color(result.tier)
+        emoji = tier_emoji(result.tier)
+        console.print(
+            f"  :dart: Routed to [bold green]{result.model}[/bold green] [{color}]{emoji} {result.tier.upper()}[/{color}]"
+        )
+        if result.latency_ms < 500:
+            lcolor, lrating = "green", ":rocket: Blazing fast!"
+        elif result.latency_ms < 1000:
+            lcolor, lrating = "yellow", ":thumbsup: Fast"
+        else:
+            lcolor, lrating = "white", ":clock1: Good"
+        console.print(
+            f"  :frog: Hopped in [bold {lcolor}]{result.latency_ms}ms[/bold {lcolor}]  {lrating}"
+        )
+        console.print()
 
     except Exception as e:
         error_msg = str(e)
         if json_output:
-            import json
-
-            console.print(json.dumps({"error": error_msg}))
+            print(json_mod.dumps({"error": error_msg}))  # noqa: T201 - raw JSON, no rich wrap
         else:
-            console.print(
-                Panel(
-                    f"[red]{error_msg}[/red]",
-                    title=":x: Error",
-                    border_style="red",
-                )
-            )
-
-
-def _get_next_fallback(mh, current_decision, tried_models):
-    available = mh.registry.get_available_providers()
-    for name, provider in available.items():
-        if name not in tried_models and name != current_decision.model.name:
-            model = mh.registry.get_model(name)
-            if model:
-                from modelhop.core.models import RoutingDecision
-
-                return RoutingDecision(
-                    model=model,
-                    tier=model.tier,
-                    reason=f"Fallback from {current_decision.model.name} (unavailable)",
-                    alternatives=[],
-                )
-    return None
+            console.print(Panel(f"[red]{error_msg}[/red]", title=":x: Error", border_style="red"))
 
 
 def _short_error(error_msg: str) -> str:
@@ -464,10 +292,3 @@ def _short_error(error_msg: str) -> str:
     if len(error_msg) > 80:
         return error_msg[:80] + "..."
     return error_msg
-
-
-def _get_consensus_provider(mh, exclude_model: str):
-    for name, provider in mh.registry.get_available_providers().items():
-        if name != exclude_model:
-            return provider
-    return None

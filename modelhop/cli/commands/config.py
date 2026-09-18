@@ -1,8 +1,9 @@
 import click
-from rich.console import Console
 from rich.panel import Panel
 
-console = Console()
+from ..display import get_console
+
+console = get_console()
 
 
 @click.command()
@@ -18,7 +19,7 @@ def config(json_output: bool) -> None:
     cfg = Config()
 
     if json_output:
-        console.print(json_mod.dumps(cfg.config, indent=2))
+        print(json_mod.dumps(cfg.config, indent=2))  # noqa: T201 - raw JSON, no rich wrap
     else:
         console.print()
         console.print(

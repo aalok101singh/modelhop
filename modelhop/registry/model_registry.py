@@ -1,4 +1,3 @@
-import os
 from typing import Dict, List, Optional
 
 from ..config import Config
@@ -23,24 +22,60 @@ except ImportError:
 
 
 class ModelRegistry:
-    def __init__(self, config: Optional[Config] = None):
+    def __init__(self, config: Optional[Config] = None, secrets=None, health=None):
         self.config = config or Config()
         self._models = self.config.get_models()
         self._providers: Dict[str, BaseProvider] = {}
+        # Secrets abstraction: env-based by default; never persisted/logged.
+        if secrets is None:
+            try:
+                from ..core.secrets import EnvSecretsProvider
+
+                secrets = EnvSecretsProvider()
+            except Exception:
+                secrets = None
+        self.secrets = secrets
+        # Health registry for circuit-breaker + latency stats.
+        if health is None:
+            try:
+                from ..core.health import HealthRegistry
+
+                health = HealthRegistry()
+            except Exception:
+                health = None
+        self.health = health
         self._init_providers()
 
     def _init_providers(self) -> None:
+        import os as _os
+
         for model in self._models:
             if model.name in self._providers:
                 continue
             provider_cls = PROVIDER_MAP.get(model.provider)
             if provider_cls is None:
                 continue
-            api_key = os.getenv(model.api_key_env, "")
+            api_key = ""
+            try:
+                if self.secrets is not None and model.api_key_env:
+                    api_key = self.secrets.get(model.api_key_env) or ""
+                if not api_key and model.api_key_env:
+                    api_key = _os.getenv(model.api_key_env, "")
+            except Exception:
+                api_key = _os.getenv(model.api_key_env, "") if model.api_key_env else ""
             if not api_key:
                 continue
             try:
-                provider = provider_cls(api_key=api_key, model=model.model)
+                try:
+                    provider = provider_cls(
+                        api_key=api_key,
+                        model=model.model,
+                        timeout_s=getattr(model, "timeout_s", 30.0),
+                        max_retries=getattr(model, "max_retries", 2),
+                    )
+                except TypeError:
+                    # Backward compat: legacy test doubles accept only (api_key, model).
+                    provider = provider_cls(api_key=api_key, model=model.model)
                 self._providers[model.name] = provider
             except Exception:
                 continue

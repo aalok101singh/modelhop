@@ -36,13 +36,27 @@ class ExperienceMemory:
     def _get_trace_path(self) -> str:
         return os.path.join(self.data_dir, TRACE_FILE)
 
+    def _signed_store(self):
+        from .persistence import SignedStore
+
+        return SignedStore(schema_version=1)
+
     def _load_persistent_memory(self):
+        from .persistence import StateIntegrityError
+
         path = self._get_memory_path()
         if not os.path.exists(path):
             return
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            try:
+                data = self._signed_store().load(path)
+            except StateIntegrityError:
+                import warnings
+
+                warnings.warn(f"Memory store {path} failed integrity check; resetting.")
+                return
+            if not isinstance(data, dict):
+                return
             for item in data.get("experiences", []):
                 try:
                     exp = Experience(
@@ -230,6 +244,9 @@ class ExperienceMemory:
             data["experiences"].append(item)
 
         try:
-            atomic_write_json(path, data)
+            self._signed_store().save(path, data)
         except Exception:
-            pass
+            try:
+                atomic_write_json(path, data)
+            except Exception:
+                pass

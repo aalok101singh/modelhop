@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ModelHop Config",
+  "type": "object",
+  "properties": {
+    "version": { "type": "string" },
+    "name": { "type": "string" },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "provider": { "type": "string" },
+          "model": { "type": "string" },
+          "tier": { "type": "string", "enum": ["free", "mid", "premium"] },
+          "capabilities": { "type": "array", "items": { "type": "string" } },
+          "cost_per_1k_input": { "type": "number" },
+          "cost_per_1k_output": { "type": "number" },
+          "api_key_env": { "type": "string" },
+          "trust": { "type": "object" },
+          "timeout_s": { "type": "number" },
+          "max_retries": { "type": "integer" }
+        },
+        "required": ["name", "provider", "model", "tier"]
+      }
+    },
+    "routing": { "type": "object" },
+    "shield": { "type": "object" },
+    "tracking": { "type": "object" }
+  },
+  "required": ["models"]
+}
