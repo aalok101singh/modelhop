@@ -51,7 +51,10 @@ dev = [
 ]
 server = [
     "fastapi>=0.115,<1.0",
-    "starlette>=1.3.1,<2.0",
+    # 1.x needs Python >=3.10; the 0.37 floor keeps 3.9 installable
+    # (modern Pythons still resolve to 1.x). Serve uses only APIs
+    # stable across 0.37 -> 1.x.
+    "starlette>=0.37.0,<2.0",
     "uvicorn>=0.30,<1.0",
 ]
 llamaindex = [
