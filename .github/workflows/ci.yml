@@ -109,7 +109,8 @@ jobs:
   gate:
     # Single required status check for branch protection: green only when
     # every CI job (all 15 test-matrix legs included) succeeded.
-    name: CI gate (all green)
+    # NOTE: no `name:` field here — GitHub reports the job id (`gate`) as
+    # the check context, which is exactly what protection requires.
     runs-on: ubuntu-latest
     needs: [test, lint, audit, cli-smoke, security]
     if: always()
