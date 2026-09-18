@@ -727,9 +727,7 @@ class ModelHop:
                     latency_slo_ms=_ctx.get("latency_slo_ms"),
                     trust_required=trust_required or {},
                     tenant_tier=str(_ctx.get("tenant_tier", "default")),
-                    capabilities_needed=list(
-                        getattr(analysis, "capabilities_needed", []) or []
-                    ),
+                    capabilities_needed=list(getattr(analysis, "capabilities_needed", []) or []),
                     estimated_tokens_in=int(getattr(analysis, "estimated_tokens", 100) or 100),
                 )
                 res = self.policy_engine.evaluate([model], ctx)
@@ -1155,9 +1153,7 @@ class ModelHop:
                         "model": "decomposed",
                         "tier": parent_decision.tier.value,
                         "confidence": composite_confidence.score,
-                        "consensus_score": getattr(
-                            composite_confidence, "consensus_score", None
-                        ),
+                        "consensus_score": getattr(composite_confidence, "consensus_score", None),
                         "propensity": 1.0,
                         "cost": cost.actual_cost,
                         "degraded": bool(
@@ -1192,8 +1188,7 @@ class ModelHop:
             )
         # Session accounting for decomposed aggregates (budget/calls/tokens/latency).
         decomposed_degraded = bool(
-            getattr(parent_decision, "degraded", False)
-            or not composite_confidence.is_confident
+            getattr(parent_decision, "degraded", False) or not composite_confidence.is_confident
         )
         if session is not None:
             try:
