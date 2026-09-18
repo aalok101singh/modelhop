@@ -2,20 +2,22 @@ import asyncio
 import json as json_mod
 
 import click
-from rich.console import Console
 from rich.table import Table
 
-from ..display import tier_color
+from ..display import get_console, tier_color
+from ..provider_errors import describe_provider_error
 
-console = Console()
+console = get_console()
 
 
-async def _test_provider(provider) -> bool:
+async def _test_provider(provider) -> tuple:
+    """Returns (ok, detail): honest reason instead of a bare failure."""
     try:
         await provider.generate("Hi", max_tokens=5)
-        return True
-    except Exception:
-        return False
+        return True, "connected"
+    except Exception as exc:
+        _kind, msg = describe_provider_error(exc, "", getattr(provider, "model", "") or "")
+        return False, msg
 
 
 @click.command()
@@ -31,10 +33,10 @@ def providers(json_output: bool) -> None:
         for model in mh.registry.get_models():
             provider = mh.registry.get_provider(model.name)
             if provider:
-                connected = asyncio.run(_test_provider(provider))
+                connected, detail = asyncio.run(_test_provider(provider))
                 status = "connected" if connected else "failed"
             else:
-                status = "no_key"
+                status, detail = "no_key", "no API key configured"
             output.append(
                 {
                     "name": model.name,
@@ -42,9 +44,10 @@ def providers(json_output: bool) -> None:
                     "model": model.model,
                     "tier": model.tier.value,
                     "status": status,
+                    "detail": detail,
                 }
             )
-        console.print(json_mod.dumps(output, indent=2))
+        print(json_mod.dumps(output, indent=2))  # noqa: T201 - raw JSON, no rich wrap
     else:
         table = Table(
             title=":frog: Model Providers",
@@ -62,11 +65,11 @@ def providers(json_output: bool) -> None:
             provider = mh.registry.get_provider(model.name)
             color = tier_color(model.tier.value)
             if provider:
-                connected = asyncio.run(_test_provider(provider))
+                connected, detail = asyncio.run(_test_provider(provider))
                 if connected:
                     status = "[green]:white_check_mark: Connected[/green]"
                 else:
-                    status = "[red]:x: Failed[/red]"
+                    status = f"[red]:x: Failed - {detail}[/red]"
             else:
                 status = "[yellow]:key: No API Key[/yellow]"
             table.add_row(

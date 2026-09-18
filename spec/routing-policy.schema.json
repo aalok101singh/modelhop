@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ModelHop Routing Policy",
+  "type": "object",
+  "properties": {
+    "version": { "type": "string" },
+    "objectives": {
+      "type": "object",
+      "properties": {
+        "quality_floor": { "type": "number", "minimum": 0, "maximum": 1 },
+        "cost_ceiling": { "type": "number", "minimum": 0 },
+        "latency_slo_ms": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "properties": {
+        "trust": {
+          "type": "object",
+          "properties": {
+            "require_zdr": { "type": "boolean" },
+            "allowed_jurisdictions": { "type": "array", "items": { "type": "string" } },
+            "max_sensitivity": { "type": "string", "enum": ["public", "internal", "confidential", "restricted"] },
+            "min_safety_tier": { "type": "string", "enum": ["standard", "elevated", "high"] },
+            "data_classes": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "budget": {
+          "type": "object",
+          "properties": {
+            "cost_ceiling": { "type": "number" },
+            "token_ceiling": { "type": "integer" }
+          }
+        }
+      }
+    }
+  },
+  "required": ["version"]
+}

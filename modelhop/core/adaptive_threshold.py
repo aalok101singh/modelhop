@@ -1,9 +1,6 @@
-import json
 import os
 from datetime import datetime
 from typing import List
-
-from .persistence import atomic_write_json
 
 ADAPTIVE_FILE = "modelhop_adaptive.json"
 
@@ -26,20 +23,36 @@ class AdaptiveThreshold:
     def _get_path(self) -> str:
         return os.path.join(self.data_dir, ADAPTIVE_FILE)
 
+    def _store(self):
+        from .persistence import SignedStore
+
+        return SignedStore(schema_version=1)
+
     def _load(self):
+        from .persistence import StateIntegrityError
+
         path = self._get_path()
         if not os.path.exists(path):
             return
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            self.threshold = data.get("threshold", self.initial)
-            self.history = data.get("history", [])[-200:]
-            self.recent_outcomes = data.get("recent_outcomes", [])[-50:]
+            try:
+                data = self._store().load(path)
+            except StateIntegrityError:
+                import warnings
+
+                warnings.warn(f"Adaptive store {path} failed integrity check; resetting.")
+                return
+            if not isinstance(data, dict):
+                return
+            self.threshold = float(data.get("threshold", self.initial))
+            self.history = list(data.get("history", []))[-200:]
+            self.recent_outcomes = list(data.get("recent_outcomes", []))[-50:]
         except Exception:
             pass
 
     def _persist(self):
+        from .persistence import atomic_write_json as _atomic
+
         path = self._get_path()
         data = {
             "threshold": self.threshold,
@@ -48,9 +61,12 @@ class AdaptiveThreshold:
             "last_updated": datetime.now().isoformat(),
         }
         try:
-            atomic_write_json(path, data)
+            self._store().save(path, data)
         except Exception:
-            pass
+            try:
+                _atomic(path, data)
+            except Exception:
+                pass
 
     def adjust(self, outcome_quality: float):
         self.recent_outcomes.append(outcome_quality)

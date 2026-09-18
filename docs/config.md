@@ -22,14 +22,28 @@ models:
     api_key_env: GROQ_API_KEY
 routing:
   confidence_threshold: 0.7
-  cross_model_consensus: true
+  cross_model_consensus: false   # opt-in only
+  llm_analysis: false            # opt-in only; default is zero-API heuristic
+  fail_closed: true              # false restores 1.0.9 fail-open behavior
   fallback: cascade
   max_retries: 3
   decompose_queries: true
+  trust_policy: {}               # e.g. {require_zdr: true, allowed_jurisdictions: [EU]}
+  cost_savings_reference: max    # or an explicit model name
+  policy_version: '1'
 shield:
   enabled: true
   quality_threshold: 0.8
+tracking:
+  log_queries: true   # persist JSONL traces + ledger entries per route
+  log_costs: true     # persist cost entries; estimates still shown when false
 ```
+
+> `modelhop setup` creates `modelhop.yaml` from the built-in defaults when no
+> file exists, so a model switch accepted in the wizard is always wired in. A
+> successful switch rewrites that provider's `model` **and** its derived `name`
+> (`provider-slug`, e.g. `openai-gpt-4o-mini`); declining removes the
+> provider's key and models (treated as not configured).
 
 ## Models
 
@@ -54,10 +68,19 @@ ModelHop runs in fully-heuristic mode and every model is treated as unavailable.
 | Option | Default | Meaning |
 |--------|---------|---------|
 | `confidence_threshold` | `0.7` | Below this confidence score, escalation may occur |
-| `cross_model_consensus` | `true` | Ask a second provider to confirm low-confidence answers |
+| `cross_model_consensus` | `false` | Opt-in: ask a separate provider + judge to confirm |
+| `llm_analysis` | `false` | Opt-in: paid LLM query analysis (default heuristic, 0 calls) |
+| `fail_closed` | `true` | Unresolved confidence escalates/`degraded`; `false` restores 1.0.9 fail-open |
 | `fallback` | `cascade` | Escalation order: free → mid → premium |
 | `max_retries` | `3` | Max attempts before giving up on a query |
 | `decompose_queries` | `true` | Split complex queries into sub-questions and merge answers |
+| `trust_policy` | `{}` | Hard constraints (ZDR, jurisdiction, sensitivity, safety, data classes) |
+| `cost_savings_reference` | `max` | Baseline = most expensive model, or explicit model name |
+| `policy_version` | `'1'` | Bumps invalidate caches |
+
+Declare per-model trust via `models[].trust` (`data_classes`, `max_sensitivity`,
+`zdr`, `jurisdiction`, `safety_tier`) plus `timeout_s`, `max_retries`,
+`context_window`, `supports_tools`, `price_effective_date`.
 
 ### Empty Tiers
 
@@ -70,6 +93,18 @@ premium models escalates free → premium without any mid model in between.
 |--------|---------|---------|
 | `enabled` | `true` | Enable quality monitoring |
 | `quality_threshold` | `0.8` | Quality below this raises an alert |
+
+## Tracking Options
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `log_queries` | `true` | Append JSONL traces, ledger entries, memory/performance learning |
+| `log_costs` | `true` | Append cost entries to `cost_log.json` |
+
+With both off, routing still works and `estimate_cost()` still powers the
+per-query panels — nothing is persisted. `modelhop stats` reads these files
+as lifetime totals; `modelhop stats --reset` clears them (learning/bandit
+memory is kept).
 
 ## Environment Variables
 

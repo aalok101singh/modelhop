@@ -17,8 +17,8 @@ from modelhop.shield.shield import Shield
 
 
 @pytest.fixture
-def shield():
-    return Shield(quality_threshold=0.8)
+def shield(tmp_path):
+    return Shield(quality_threshold=0.8, data_dir=str(tmp_path))
 
 
 @pytest.fixture

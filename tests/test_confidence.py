@@ -22,8 +22,14 @@ class MockProvider:
 
 
 def test_high_self_confidence_passes(engine):
+    # v1.1: self-report is combined with local heuristic (never trusted blindly).
+    # Use a substantive answer so the heuristic also supports confidence.
     resp = ProviderResponse(
-        content="Great answer", model_used="m", provider="p", tokens_in=100, tokens_out=50
+        content="Great answer " * 50,
+        model_used="m",
+        provider="p",
+        tokens_in=100,
+        tokens_out=50,
     )
     provider = MockProvider()
     result = asyncio.run(engine.check("query", resp, provider))

@@ -24,6 +24,14 @@ class EmotionalTone(str, Enum):
     ANGRY = "angry"
 
 
+class TrustProfile(BaseModel):
+    data_classes: List[str] = Field(default_factory=lambda: ["general"])
+    max_sensitivity: str = "public"  # public|internal|confidential|restricted
+    zdr: bool = False
+    jurisdiction: Optional[str] = None
+    safety_tier: str = "standard"  # standard|elevated|high
+
+
 class ModelConfig(BaseModel):
     name: str
     provider: str
@@ -35,6 +43,13 @@ class ModelConfig(BaseModel):
     max_tokens: int = 4096
     avg_latency_ms: int = 500
     api_key_env: str = ""
+    trust: TrustProfile = Field(default_factory=TrustProfile)
+    context_window: int = 0
+    supports_tools: bool = False
+    supports_streaming: bool = True
+    timeout_s: float = 30.0
+    max_retries: int = 2
+    price_effective_date: Optional[str] = None
 
 
 class QueryAnalysis(BaseModel):
@@ -51,6 +66,12 @@ class RoutingDecision(BaseModel):
     tier: Tier
     reason: str
     alternatives: List[ModelConfig] = Field(default_factory=list)
+    degraded: bool = False
+    constraints_applied: List[str] = Field(default_factory=list)
+    bandit_score: float = 0.0
+    predicted_cost: float = 0.0
+    predicted_latency_ms: int = 0
+    cache_key: Optional[str] = None
 
 
 class ProviderResponse(BaseModel):
@@ -60,7 +81,7 @@ class ProviderResponse(BaseModel):
     tokens_in: int = 0
     tokens_out: int = 0
     latency_ms: int = 0
-    raw_response: Optional[Any] = None
+    raw_response: Optional[Any] = Field(default=None, exclude=True)
 
 
 class ConfidenceResult(BaseModel):
@@ -71,6 +92,10 @@ class ConfidenceResult(BaseModel):
     consensus_score: Optional[float] = None
     reasoning: str = ""
     auxiliary_responses: List[ProviderResponse] = Field(default_factory=list)
+    calibrated: bool = False
+    method: str = "heuristic"  # heuristic|calibrated|consensus
+    ece: Optional[float] = None
+    degraded: bool = False
 
 
 class CostAnalysis(BaseModel):
@@ -80,6 +105,12 @@ class CostAnalysis(BaseModel):
     savings_percentage: float
     model_used: str
     tier: str
+    baseline_model: str = ""
+    aux_calls: int = 0
+    aux_cost: float = 0.0
+    currency: str = "USD"
+    tokens_in: int = 0
+    tokens_out: int = 0
 
 
 class TraceEntry(BaseModel):
@@ -94,6 +125,81 @@ class TraceEntry(BaseModel):
     fallback_used: bool = False
     fallback_count: int = 0
     total_latency_ms: int = 0
+    ledger_id: Optional[str] = None
+    cache_hit: bool = False
+    degraded: bool = False
+    policy_version: str = "1"
+
+
+class VerifierResult(BaseModel):
+    verifier_name: str
+    passed: bool
+    score: float = 0.0
+    details: dict = Field(default_factory=dict)
+
+
+class PerformanceCard(BaseModel):
+    schema_version: int = 1
+    model: str
+    query_type: str
+    sample_count: int
+    avg_quality: float
+    avg_latency_ms: int
+    fallback_rate: float
+    region: Optional[str] = None
+    mac: str = ""
+
+
+class RouteResult(BaseModel):
+    response: str
+    model: str
+    tier: str
+    reasoning: str = ""
+    confidence: ConfidenceResult
+    cost: CostAnalysis
+    candidates: list = Field(default_factory=list)
+    degraded: bool = False
+    cached: bool = False
+    trust: TrustProfile = Field(default_factory=TrustProfile)
+    verifier: Optional[VerifierResult] = None
+    ledger_id: str = ""
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    # Backward-compat bridge (not a serialized field).
+    _provider_response: Optional[ProviderResponse] = None  # type: ignore
+
+    @property
+    def content(self) -> str:
+        return self.response
+
+    @property
+    def model_used(self) -> str:
+        return self.model
+
+    @property
+    def provider(self) -> str:
+        if self._provider_response is not None:
+            return self._provider_response.provider
+        return ""
+
+    @property
+    def tokens_in(self) -> int:
+        if self._provider_response is not None:
+            return self._provider_response.tokens_in
+        return 0
+
+    @property
+    def tokens_out(self) -> int:
+        if self._provider_response is not None:
+            return self._provider_response.tokens_out
+        return 0
+
+    @property
+    def latency_ms(self) -> int:
+        if self._provider_response is not None:
+            return self._provider_response.latency_ms
+        return 0
 
 
 class HopScoreResult(BaseModel):
@@ -169,6 +275,7 @@ class Experience(BaseModel):
 
 class PerformanceMetrics(BaseModel):
     sample_count: int = 0
+    weight_sum: float = 0.0
     avg_quality: float = 0.0
     quality_stddev: float = 0.0
     avg_latency_ms: int = 0

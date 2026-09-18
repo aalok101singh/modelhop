@@ -1,12 +1,14 @@
-from typing import List, Optional
+from typing import Dict, List
 
 from .config import Config
 from .core.adaptive_threshold import AdaptiveThreshold
 from .core.analyzer import QueryAnalyzer
+from .core.calibration import Calibrator
 from .core.confidence import ConfidenceEngine
 from .core.decomposer import QueryDecomposer
 from .core.fallback import CascadeFallback
 from .core.features import FeatureExtractor
+from .core.health import HealthRegistry
 from .core.learning_router import LearningRouter
 from .core.memory import ExperienceMemory
 from .core.models import (
@@ -19,33 +21,64 @@ from .core.models import (
     HubConfig,
     ModelConfig,
     ModelProfile,
+    PerformanceCard,
     PerformanceMetrics,
     ProviderResponse,
     QueryAnalysis,
     QueryFeatures,
     QueryType,
+    RouteResult,
     RoutingDecision,
     ShieldStatus,
     SubQuery,
     Tier,
     TraceEntry,
+    TrustProfile,
+    VerifierResult,
 )
 from .core.performance import PerformanceTracker
 from .core.reasoning import ReasoningEngine
 from .core.router import Router
+from .core.secrets import EnvSecretsProvider
 from .hub.hub import Hub
 from .registry.model_registry import ModelRegistry
 from .shield.shield import Shield
-from .tracking.cost_tracker import CostTracker, estimate_cost
-from .tracking.hop_score import HopScore
+from .tracking.cost_tracker import CostTracker, PriceBook, estimate_cost
+from .tracking.hop_score import HopScore, is_optimal_hop
+from .tracking.ledger import DecisionLedger
 from .tracking.trace_logger import TraceLogger
 
 
 class ModelHop:
-    def __init__(self, config_path: str = None):
+    """One brain, many bodies: SDK is the brain; CLI/HTTP are thin shells."""
+
+    def __init__(self, config_path: str = None, secrets=None):
         self.config = Config(config_path)
-        self.registry = ModelRegistry(self.config)
+        routing = self.config.get_routing_config()
+        # Secrets: env-based default, chainable.
+        if secrets is None:
+            try:
+                secrets = EnvSecretsProvider()
+            except Exception:
+                secrets = None
+        self.secrets = secrets
+        self.health = HealthRegistry()
+        self.registry = ModelRegistry(self.config, secrets=secrets, health=self.health)
+        # Share health registry.
+        if getattr(self.registry, "health", None) is not None:
+            try:
+                self.health = self.registry.health or self.health
+            except Exception:
+                pass
         self.models = self.registry.get_models()
+
+        self.trust_policy: Dict = dict(routing.get("trust_policy", {}) or {})
+        self.fail_closed: bool = bool(routing.get("fail_closed", True))
+        self.policy_version: str = str(routing.get("policy_version", "1"))
+        self.cost_reference: str = str(routing.get("cost_savings_reference", "max"))
+        self.llm_analysis: bool = bool(routing.get("llm_analysis", False))
+        self.enable_consensus: bool = bool(routing.get("cross_model_consensus", False))
+        self.decompose_queries: bool = bool(routing.get("decompose_queries", True))
 
         available_providers = []
         for model in self.models:
@@ -53,77 +86,632 @@ class ModelHop:
             if p is not None:
                 available_providers.append(p)
 
-        self.analyzer = QueryAnalyzer(available_providers)
-        self.router = Router(self.models)
+        self.analyzer = QueryAnalyzer(available_providers, enable_llm=self.llm_analysis)
+        self.router = Router(self.models, trust_policy=self.trust_policy)
 
         self.feature_extractor = FeatureExtractor()
         self.memory = ExperienceMemory()
-        self.performance = PerformanceTracker(self.memory)
-        self.learning_router = LearningRouter(self.models, self.memory, self.performance)
+        self.performance = PerformanceTracker(self.memory, models=self.models)
+        self.learning_router = LearningRouter(
+            self.models, self.memory, self.performance, trust_policy=self.trust_policy
+        )
         self.adaptive_threshold = AdaptiveThreshold(
-            initial=self.config.get_routing_config().get("confidence_threshold", 0.7)
+            initial=routing.get("confidence_threshold", 0.7)
         )
         self.reasoning_engine = ReasoningEngine(self.memory, self.performance)
         self.decomposer = QueryDecomposer()
 
+        # Calibration + bandit (signed persistence).
+        try:
+            from .core.persistence import SignedStore as _SS
+
+            _store = _SS(schema_version=1)
+        except Exception:
+            _store = None
+        self._store = _store
+        self.calibrator = Calibrator()
+        if _store is not None:
+            try:
+                self.calibrator = Calibrator.load(_store)
+            except Exception:
+                pass
         self.confidence_engine = ConfidenceEngine(
             threshold=self.adaptive_threshold.get_threshold(),
-            enable_consensus=self.config.get_routing_config().get("cross_model_consensus", True),
+            enable_consensus=self.enable_consensus,
+            fail_closed=self.fail_closed,
+            calibrator=self.calibrator,
         )
-        self.fallback = CascadeFallback(
-            self.models, max_retries=self.config.get_routing_config().get("max_retries", 3)
+        self.fallback = CascadeFallback(self.models, max_retries=routing.get("max_retries", 3))
+        # Price book + cost tracker.
+        try:
+            price_book = PriceBook.from_models(self.models, reference=self.cost_reference)
+        except Exception:
+            price_book = None
+        self.cost_tracker = CostTracker(
+            price_book=price_book,
+            all_models=self.models,
+            cost_savings_reference=self.cost_reference,
         )
-        self.cost_tracker = CostTracker()
         self.trace_logger = TraceLogger()
         self.hop_score = HopScore()
         self.shield = Shield(
             quality_threshold=self.config.get_shield_config().get("quality_threshold", 0.8)
         )
         self.hub = Hub()
+        self.ledger = DecisionLedger()
 
-        self.decompose_queries = self.config.get_routing_config().get("decompose_queries", True)
+        # Policy engine + bandit.
+        try:
+            from .core.policy.bandit import ContextualBandit
+            from .core.policy.engine import default_engine
+
+            self.policy_engine = default_engine(self.trust_policy, health=self.health)
+            self.bandit = ContextualBandit()
+            if _store is not None:
+                try:
+                    self.bandit = ContextualBandit.load(_store)
+                except Exception:
+                    pass
+            # Seed priors from performance profiles.
+            try:
+                for _name, _prof in self.performance.get_all_profiles().items():
+                    for _qt, _mdata in _prof.performance_by_query_type.items():
+                        _m = PerformanceMetrics(**_mdata)
+                        if _m.sample_count >= 2:
+                            for _bucket in ("simple", "medium", "complex"):
+                                _key = f"{_qt}x{_bucket}xdefault"
+                                self.bandit.seed_prior(
+                                    _name, _key, _m.avg_quality, min(_m.sample_count, 5)
+                                )
+            except Exception:
+                pass
+        except Exception:
+            self.policy_engine = None
+            self.bandit = None
+
+        # Cache + verifier + sessions.
+        try:
+            from .cache.exact import ExactCache
+            from .cache.semantic import SemanticCache
+
+            self.exact_cache = ExactCache()
+            self.semantic_cache = SemanticCache(store_text=True)
+        except Exception:
+            self.exact_cache = None
+            self.semantic_cache = None
+        try:
+            from .core.verifier.base import VerifierPipeline
+
+            self.verifier = VerifierPipeline()
+        except Exception:
+            self.verifier = None
+        try:
+            from .core.session import SessionManager
+
+            self.sessions = SessionManager()
+        except Exception:
+            self.sessions = None
 
         self.performance.rebuild_from_memory()
+        try:
+            self.performance.set_models(self.models)
+        except Exception:
+            pass
 
-    async def route(self, query: str) -> ProviderResponse:
+    # -- New v1.1 SDK -----------------------------------------------------
+    async def route(
+        self,
+        query: str,
+        *,
+        task_id=None,
+        budget=None,
+        trust_required=None,
+        context=None,
+    ) -> RouteResult:
+        """Zero-API default path: features -> constraints -> cache -> bandit -> verify."""
+        from .core.policy.engine import PolicyContext
+        from .core.reward import compute_reward
+
+        context = context or {}
+        trust_required = trust_required or {}
+        # Session / budget handling.
+        session = None
+        if (task_id is not None or budget is not None) and self.sessions is not None:
+            try:
+                session = self.sessions.create(task_id=task_id, budget=budget)
+            except Exception:
+                session = None
+
         query_features = self.feature_extractor.extract(query)
         analysis = await self.analyzer.analyze(query)
 
-        decision, reasoning = self.learning_router.route(analysis, query_features)
+        # Surface reasoning: learning_router returns (decision, reasoning).
+        try:
+            decision, reasoning = self.learning_router.route(
+                analysis, query_features, trust_required=trust_required
+            )
+        except Exception as exc:
+            # Fail-closed: no eligible candidate => refuse.
+            from .core.trust import TrustViolation
+
+            if isinstance(exc, TrustViolation) or "trust" in str(exc).lower():
+                raise RuntimeError(f"Request refused: no model satisfies trust policy ({exc})")
+            raise
 
         self.confidence_engine.threshold = self.adaptive_threshold.get_threshold()
 
+        # Policy engine hard constraints (trust/budget/SLO/health/capability).
+        constraints_applied: List[str] = list(decision.constraints_applied or [])
+        candidates = [decision.model] + list(decision.alternatives or [])
+        bandit_score = 0.0
+        policy_ctx = PolicyContext(
+            query_type=query_features.query_type.value,
+            complexity=analysis.complexity,
+            budget_remaining=(
+                (session.budget - session.spent) if session and session.budget else None
+            ),
+            cost_ceiling=context.get("cost_ceiling"),
+            latency_slo_ms=context.get("latency_slo_ms"),
+            trust_required=trust_required,
+            tenant_tier=str(context.get("tenant_tier", "default")),
+            capabilities_needed=list(analysis.capabilities_needed or []),
+            estimated_tokens_in=int(analysis.estimated_tokens or 100),
+        )
+        if self.policy_engine is not None:
+            try:
+                result = self.policy_engine.evaluate(candidates, policy_ctx)
+                if not result.eligible:
+                    if self.fail_closed:
+                        raise RuntimeError(
+                            "Request refused: policy excludes all candidates: "
+                            + "; ".join(result.excluded)
+                        )
+                else:
+                    candidates = result.eligible
+                    decision.model = candidates[0]
+                    decision.tier = decision.model.tier
+                    constraints_applied = sorted(
+                        set(constraints_applied)
+                        | (["trust_policy"] if self.trust_policy or trust_required else [])
+                        | (["budget"] if policy_ctx.budget_remaining is not None else [])
+                        | (["latency_slo"] if policy_ctx.latency_slo_ms else [])
+                    )
+                    decision.constraints_applied = constraints_applied
+                    # Attach penalties for bandit.
+                    policy_ctx.penalties = result.penalties  # type: ignore
+            except RuntimeError:
+                raise
+            except Exception:
+                pass
+
+        # Cache: exact -> semantic (miss => continue).
+        cached = False
+        cache_key = None
+        if self.exact_cache is not None:
+            try:
+                from .cache.exact import cache_key as _ck
+
+                model_set_version = ",".join(sorted(m.name for m in self.models))
+                tenant = str(context.get("tenant", "default"))
+                cache_key = _ck(query, model_set_version, self.policy_version, tenant)
+                hit = self.exact_cache.get(cache_key)
+                if (
+                    hit
+                    and isinstance(hit, dict)
+                    and hit.get("policy_version", "1") == self.policy_version
+                ):
+                    return self._result_from_cache(
+                        hit,
+                        decision,
+                        reasoning,
+                        query_features,
+                        analysis,
+                        cache_key=cache_key,
+                        trust_required=trust_required,
+                    )
+            except Exception:
+                pass
+        if self.semantic_cache is not None and not cached:
+            try:
+                sem = self.semantic_cache.get(query, policy_version=self.policy_version)
+                if sem and sem.get("response"):
+                    # Only use semantic hit when raw text storage is allowed.
+                    hit = {
+                        "response": sem["response"],
+                        "model": sem.get("model", decision.model.name),
+                        "policy_version": self.policy_version,
+                    }
+                    return self._result_from_cache(
+                        hit,
+                        decision,
+                        reasoning,
+                        query_features,
+                        analysis,
+                        cache_key=cache_key,
+                        trust_required=trust_required,
+                        semantic=True,
+                    )
+            except Exception:
+                pass
+
+        # Bandit selection among policy-eligible candidates.
+        if self.bandit is not None and len(candidates) > 1:
+            try:
+                pick, score, _info = self.bandit.select(candidates, policy_ctx)
+                decision.model = pick
+                decision.tier = pick.tier
+                bandit_score = float(score)
+                decision.bandit_score = bandit_score
+            except Exception:
+                pass
+        # Session coherence pin.
+        if session is not None and getattr(session, "pinned_model", None):
+            pinned = self.registry.get_model(session.pinned_model)
+            if pinned is not None and pinned in candidates:
+                decision.model = pinned
+                decision.tier = pinned.tier
+
+        # Decomposed path with real sub-query merge.
         if self.decompose_queries:
             sub_queries = self.decomposer.decompose(query, analysis)
             if len(sub_queries) > 1:
-                return await self._route_decomposed(
-                    query, query_features, analysis, decision, sub_queries
+                return await self._route_decomposed_v11(
+                    query,
+                    query_features,
+                    analysis,
+                    decision,
+                    reasoning,
+                    sub_queries,
+                    session=session,
+                    trust_required=trust_required,
+                    context=context,
+                    cache_key=cache_key,
+                    bandit_score=bandit_score,
                 )
 
-        response, confidence, decision, fallback_total = await self._generate_and_check(
-            query, analysis, query_features, decision
-        )
+        # Budget pre-check.
+        if session is not None:
+            try:
+                est = (policy_ctx.estimated_tokens_in / 1000) * decision.model.cost_per_1k_input
+                ok, reason = session.check_allow(est_cost=est)
+                if not ok:
+                    degraded = True
+                    if self.fail_closed and "budget" in reason:
+                        raise RuntimeError(f"Request refused: session {reason}")
+            except RuntimeError:
+                raise
+            except Exception:
+                pass
 
-        self._finish_route(
-            query, query_features, analysis, decision, response, confidence, fallback_total
+        response, confidence, decision, fallback_total = await self._generate_and_check_v11(
+            query, analysis, query_features, decision, trust_required=trust_required
         )
-        return response
+        # Verifier gate (generic): fail => escalate once to safest trusted model.
+        verifier_result = None
+        if self.verifier is not None and getattr(self.verifier, "verifiers", []):
+            try:
+                verifier_result = self.verifier.verify(query, response.content, context)
+                if not verifier_result.passed:
+                    esc = self._safest_trusted(candidates, trust_required)
+                    if esc is not None and esc.name != decision.model.name:
+                        provider = self.registry.get_provider(esc.name)
+                        if provider is not None:
+                            try:
+                                response = await provider.generate(query)
+                                verifier_result = self.verifier.verify(
+                                    query, response.content, context
+                                )
+                                decision = RoutingDecision(
+                                    model=esc,
+                                    tier=esc.tier,
+                                    reason=f"Verifier escalated to safest trusted {esc.name}",
+                                    alternatives=[],
+                                    degraded=True,
+                                    constraints_applied=constraints_applied,
+                                )
+                            except Exception:
+                                pass
+            except Exception:
+                verifier_result = None
 
-    async def _generate_and_check(
+        # Fail-closed confidence escalation.
+        degraded = bool(getattr(decision, "degraded", False) or confidence.degraded)
+        if not confidence.is_confident and self.fail_closed:
+            degraded = True
+            # Escalate to safest trusted model if not already there.
+            safest = self._safest_trusted(candidates, trust_required)
+            if safest is not None and safest.name != decision.model.name:
+                provider = self.registry.get_provider(safest.name)
+                if provider is not None:
+                    try:
+                        esc_response = await provider.generate(query)
+                        esc_conf = await self.confidence_engine.check(
+                            query, esc_response, query_features=query_features
+                        )
+                        # Accept escalation even if still low (safest effort), mark degraded.
+                        response = esc_response
+                        confidence = esc_conf
+                        decision = RoutingDecision(
+                            model=safest,
+                            tier=safest.tier,
+                            reason=f"Fail-closed escalation to safest trusted {safest.name}",
+                            alternatives=[],
+                            degraded=True,
+                            constraints_applied=constraints_applied,
+                        )
+                        degraded = True
+                    except Exception:
+                        pass
+
+        # Predicted cost/latency.
+        try:
+            decision.predicted_cost = (
+                response.tokens_in / 1000
+            ) * decision.model.cost_per_1k_input + (
+                response.tokens_out / 1000
+            ) * decision.model.cost_per_1k_output
+            decision.predicted_latency_ms = int(response.latency_ms)
+            decision.cache_key = cache_key
+        except Exception:
+            pass
+
+        # Reward + learning updates.
+        cost = self._route_cost(response, decision.model, confidence)
+        reward = 0.0
+        try:
+            reward = compute_reward(
+                quality=float(confidence.score),
+                cost=float(cost.actual_cost),
+                latency_ms=int(response.latency_ms),
+                verifier_pass=bool(verifier_result.passed) if verifier_result else True,
+                fallback=bool(fallback_total > 0),
+                retries=int(fallback_total),
+            )
+        except Exception:
+            pass
+        self._finish_route_v11(
+            query,
+            query_features,
+            analysis,
+            decision,
+            response,
+            confidence,
+            fallback_total,
+            cost,
+            reward,
+            policy_ctx,
+            degraded,
+        )
+        # Ledger append (hash-chained, signed).
+        ledger_id = ""
+        try:
+            entry = self.ledger.append(
+                {
+                    "query": query[:500],
+                    "model": decision.model.name,
+                    "tier": decision.tier.value,
+                    "confidence": confidence.score,
+                    "cost": cost.actual_cost,
+                    "degraded": degraded,
+                    "policy_version": self.policy_version,
+                }
+            )
+            ledger_id = f"{entry.get('seq', '')}:{entry.get('payload_hash', '')[:12]}"
+        except Exception:
+            pass
+        # OTel export (best-effort).
+        try:
+            from .tracking.otel import record_route as _otel_route
+
+            _otel_route(
+                query=query,
+                model=decision.model.name,
+                confidence=confidence.score,
+                cost=cost.actual_cost,
+                degraded=degraded,
+            )
+        except Exception:
+            pass
+        # Cache store.
+        try:
+            if self.exact_cache is not None and cache_key:
+                self.exact_cache.put(
+                    cache_key,
+                    {
+                        "response": response.content,
+                        "model": decision.model.name,
+                        "tier": decision.tier.value,
+                        "policy_version": self.policy_version,
+                    },
+                )
+            if self.semantic_cache is not None:
+                # Respect privacy: skip semantic store when policy forbids raw text.
+                allow_text = True
+                if isinstance(trust_required, dict) and trust_required.get("no_raw_cache"):
+                    allow_text = False
+                if allow_text:
+                    self.semantic_cache.put(
+                        query,
+                        response.content,
+                        decision.model.name,
+                        policy_version=self.policy_version,
+                    )
+        except Exception:
+            pass
+        if session is not None:
+            try:
+                session.record(
+                    cost.actual_cost, response.tokens_in + response.tokens_out, response.latency_ms
+                )
+            except Exception:
+                pass
+
+        reasoning_full = self.reasoning_engine.explain(
+            query=query,
+            analysis=analysis,
+            decision=decision,
+            query_features=query_features,
+            merged_reasoning=reasoning,
+        )
+        result = RouteResult(
+            response=response.content,
+            model=decision.model.name,
+            tier=decision.tier.value,
+            reasoning=reasoning_full,
+            confidence=confidence,
+            cost=cost,
+            candidates=[m.name for m in candidates],
+            degraded=degraded,
+            cached=False,
+            trust=decision.model.trust,
+            verifier=verifier_result,
+            ledger_id=ledger_id,
+        )
+        try:
+            object.__setattr__(result, "_provider_response", response)
+        except Exception:
+            try:
+                result._provider_response = response  # type: ignore
+            except Exception:
+                pass
+        return result
+
+    def explain(self, result: RouteResult) -> str:
+        parts = [
+            f"Model: {result.model} [{result.tier}]",
+            f"Reasoning: {result.reasoning}",
+            f"Confidence: {result.confidence.score:.2f} ({result.confidence.method})",
+            f"Cost: ${result.cost.actual_cost:.4f} (baseline {result.cost.baseline_model})",
+        ]
+        if result.cached:
+            parts.append("cached: true")
+        if result.degraded:
+            parts.append(
+                f"degraded: true (confidence {result.confidence.score:.2f} "
+                f"< {result.confidence.threshold:.2f})"
+            )
+        if result.verifier is not None:
+            parts.append(
+                f"verifier {result.verifier.verifier_name}: {'pass' if result.verifier.passed else 'fail'}"
+            )
+        if result.ledger_id:
+            parts.append(f"ledger: {result.ledger_id}")
+        return " | ".join(parts)
+
+    def _safest_trusted(self, candidates: List[ModelConfig], trust_required=None):
+        # Safest = highest safety_tier, then ZDR, then premium tier.
+        from .core.trust import filter_by_trust
+
+        eligible, _ = filter_by_trust(candidates, self.trust_policy, trust_required or {})
+        if not eligible:
+            return None
+        order = {"standard": 0, "elevated": 1, "high": 2}
+
+        def _key(m):
+            return (
+                order.get(getattr(m.trust, "safety_tier", "standard"), 0),
+                1 if getattr(m.trust, "zdr", False) else 0,
+                {"free": 0, "mid": 1, "premium": 2}.get(m.tier.value, 0),
+            )
+
+        return sorted(eligible, key=_key, reverse=True)[0]
+
+    def _result_from_cache(
         self,
-        query: str,
-        analysis: QueryAnalysis,
-        query_features: QueryFeatures,
-        decision: RoutingDecision,
+        hit: dict,
+        decision,
+        reasoning,
+        query_features,
+        analysis,
+        cache_key=None,
+        trust_required=None,
+        semantic: bool = False,
+    ) -> RouteResult:
+        model_name = hit.get("model", decision.model.name)
+        model = self.registry.get_model(model_name) or decision.model
+        content = hit.get("response", "")
+        # Honest confidence for cache hits: high but marked.
+        conf = ConfidenceResult(
+            score=0.95,
+            is_confident=True,
+            threshold=self.confidence_engine.threshold,
+            reasoning="Cache hit",
+            calibrated=False,
+            method="heuristic",
+        )
+        cost = CostAnalysis(
+            actual_cost=0.0,
+            would_have_cost=0.0,
+            savings=0.0,
+            savings_percentage=0.0,
+            model_used=model.name,
+            tier=model.tier.value,
+            baseline_model=cost_baseline(self),
+            aux_calls=0,
+            aux_cost=0.0,
+        )
+        reasoning_full = (
+            self.reasoning_engine.explain(
+                query_features=query_features,
+                analysis=analysis,
+                decision=decision,
+                query="",
+                merged_reasoning=reasoning + " | cache hit",
+            )
+            if hasattr(self.reasoning_engine, "explain")
+            else reasoning
+        )
+        result = RouteResult(
+            response=content,
+            model=model.name,
+            tier=model.tier.value,
+            reasoning=reasoning_full,
+            confidence=conf,
+            cost=cost,
+            candidates=[model.name],
+            degraded=False,
+            cached=True,
+            trust=model.trust,
+            verifier=None,
+            ledger_id="cache",
+        )
+        try:
+            pr = ProviderResponse(
+                content=content,
+                model_used=model.name,
+                provider=model.provider,
+                tokens_in=0,
+                tokens_out=0,
+                latency_ms=0,
+            )
+            object.__setattr__(result, "_provider_response", pr)
+        except Exception:
+            pass
+        return result
+
+    async def _generate_and_check_v11(
+        self, query, analysis, query_features, decision, trust_required=None
     ):
+        # Zero-API default: no provider passed to confidence; no consensus unless enabled.
         budget = self.fallback.max_retries + 1
         attempts = 0
         tried = {decision.model.name}
         current = decision
         best = None
         all_aux: List[ProviderResponse] = []
-
+        # Health-gated candidates.
         while attempts < budget:
+            # Circuit-breaker skip.
+            try:
+                if not self.health.allow(current.model.name):
+                    nxt = self._next_fallback_decision(current, tried, analysis)
+                    if nxt is None:
+                        break
+                    current = nxt
+                    tried.add(nxt.model.name)
+                    continue
+            except Exception:
+                pass
             provider = self.registry.get_provider(current.model.name)
             attempts += 1
             if provider is None:
@@ -135,51 +723,80 @@ class ModelHop:
                 continue
             try:
                 response = await provider.generate(query)
-            except Exception:
+                try:
+                    self.health.record_success(current.model.name, response.latency_ms)
+                except Exception:
+                    pass
+            except Exception as exc:
+                try:
+                    self.health.record_failure(current.model.name, exc)
+                except Exception:
+                    pass
                 nxt = self._next_fallback_decision(current, tried, analysis)
                 if nxt is None:
                     break
                 current = nxt
                 tried.add(nxt.model.name)
                 continue
-
-            confidence = await self.confidence_engine.check(
-                query,
-                response,
-                provider,
-                consensus_provider=self._get_consensus_provider(current.model.name),
-                query_features=query_features,
-            )
+            # Zero-aux default: no provider/consensus passed.
+            if self.enable_consensus:
+                confidence = await self.confidence_engine.check(
+                    query,
+                    response,
+                    provider=None,
+                    consensus_provider=(
+                        self._get_consensus_provider(current.model.name)
+                        if self.enable_consensus
+                        else None
+                    ),
+                    query_features=query_features,
+                )
+                # Record aux for accounting if consensus fired.
+                for aux in confidence.auxiliary_responses:
+                    try:
+                        self.cost_tracker.record_aux("consensus", aux)
+                    except Exception:
+                        pass
+            else:
+                confidence = await self.confidence_engine.check(
+                    query,
+                    response,
+                    provider=None,
+                    consensus_provider=None,
+                    query_features=query_features,
+                )
             all_aux.extend(confidence.auxiliary_responses)
-
             if confidence.is_confident:
                 confidence = confidence.model_copy(update={"auxiliary_responses": all_aux})
                 return response, confidence, current, attempts - 1
-
             best = (current, response, confidence)
             nxt = self._next_fallback_decision(current, tried, analysis)
             if nxt is None:
                 break
             current = nxt
             tried.add(nxt.model.name)
-
         if best is not None:
             current, response, confidence = best
             confidence = confidence.model_copy(update={"auxiliary_responses": all_aux})
             return response, confidence, current, attempts - 1
-
         raise RuntimeError(
             f"No provider could handle the query after {self.fallback.max_retries} retries"
         )
 
-    async def _route_decomposed(
+    async def _route_decomposed_v11(
         self,
-        query: str,
-        query_features: QueryFeatures,
-        analysis: QueryAnalysis,
-        parent_decision: RoutingDecision,
+        query,
+        query_features,
+        analysis,
+        parent_decision,
+        reasoning,
         sub_queries,
-    ) -> ProviderResponse:
+        session=None,
+        trust_required=None,
+        context=None,
+        cache_key=None,
+        bandit_score=0.0,
+    ) -> RouteResult:
         responses = []
         confidences = []
         costs = []
@@ -192,16 +809,20 @@ class ModelHop:
         failed_parts = []
         tracking = self.config.get_tracking_config()
         log_queries = tracking.get("log_queries", True)
-
         for sub in sub_queries:
             try:
                 sub_features = self.feature_extractor.extract(sub.query)
-                sub_decision, _ = self.learning_router.route(sub.analysis, sub_features)
-                self.confidence_engine.threshold = self.adaptive_threshold.get_threshold()
-                resp, conf, final_decision, fb = await self._generate_and_check(
-                    sub.query, sub.analysis, sub_features, sub_decision
+                sub_decision, _ = self.learning_router.route(
+                    sub.analysis, sub_features, trust_required=trust_required or {}
                 )
-
+                self.confidence_engine.threshold = self.adaptive_threshold.get_threshold()
+                resp, conf, final_decision, fb = await self._generate_and_check_v11(
+                    sub.query,
+                    sub.analysis,
+                    sub_features,
+                    sub_decision,
+                    trust_required=trust_required,
+                )
                 responses.append(resp)
                 confidences.append(conf.score)
                 fallback_used = fallback_used or (fb > 0)
@@ -222,32 +843,30 @@ class ModelHop:
             except Exception as exc:
                 failed_parts.append(f"'{sub.query}' (purpose: {sub.purpose or 'complete'}): {exc}")
                 continue
-
         if failed_parts:
             raise RuntimeError(
                 f"Some sub-queries for '{query}' failed: " + " | ".join(failed_parts)
             )
-
         if not responses:
             raise RuntimeError(f"All sub-queries for '{query}' failed")
-
+        # Real sub-query merge.
+        composite_text = self.decomposer.synthesize(responses)
         composite = ProviderResponse(
-            content=self.decomposer.synthesize(responses),
+            content=composite_text,
             model_used="decomposed",
             provider="decomposed",
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             latency_ms=total_latency,
         )
-
         min_confidence = min(confidences)
         composite_confidence = ConfidenceResult(
             score=min_confidence,
             is_confident=min_confidence >= self.confidence_engine.threshold,
             threshold=self.confidence_engine.threshold,
             reasoning=f"Minimum confidence across {len(confidences)} sub-queries",
+            method="heuristic",
         )
-
         if log_queries:
             for model_name, qtype, quality, latency, used_fb in perf_records:
                 self.performance.record_outcome(
@@ -267,10 +886,10 @@ class ModelHop:
                 latency_ms=total_latency,
             )
             self.adaptive_threshold.adjust(composite_confidence.score)
-
         if costs:
             actual = sum(c.actual_cost for c in costs)
             would = sum(c.would_have_cost for c in costs)
+            baseline = costs[0].baseline_model if costs else cost_baseline(self)
             cost = CostAnalysis(
                 actual_cost=actual,
                 would_have_cost=would,
@@ -278,11 +897,30 @@ class ModelHop:
                 savings_percentage=(would - actual) / would * 100 if would > 0 else 0,
                 model_used="decomposed",
                 tier=parent_decision.tier.value,
+                baseline_model=baseline,
+                tokens_in=int(sum(c.tokens_in for c in costs)),
+                tokens_out=int(sum(c.tokens_out for c in costs)),
             )
         else:
-            cost = estimate_cost(composite, parent_decision.model)
-
+            cost = estimate_cost(
+                composite,
+                parent_decision.model,
+                price_book=getattr(self.cost_tracker, "price_book", None),
+                all_models=self.models,
+            )
+        ledger_id = ""
         if log_queries:
+            try:
+                entry = self.ledger.append(
+                    {
+                        "query": query[:500],
+                        "model": "decomposed",
+                        "confidence": composite_confidence.score,
+                    }
+                )
+                ledger_id = f"{entry.get('seq','')}:{entry.get('payload_hash','')[:12]}"
+            except Exception:
+                pass
             trace = self.trace_logger.log(
                 query=query,
                 analysis=analysis,
@@ -291,25 +929,95 @@ class ModelHop:
                 confidence=composite_confidence,
                 cost=cost,
                 fallback_count=total_fallback,
+                ledger_id=ledger_id or None,
             )
             self.shield.check_quality(trace)
-            self.hop_score.update(composite_confidence.is_confident)
+            self.hop_score.update(
+                is_optimal_hop(
+                    composite_confidence.is_confident, cost.savings, cost.would_have_cost
+                )
+            )
+        reasoning_full = self.reasoning_engine.explain(
+            query=query,
+            analysis=analysis,
+            decision=parent_decision,
+            query_features=query_features,
+            merged_reasoning=reasoning,
+        )
+        result = RouteResult(
+            response=composite_text,
+            model="decomposed",
+            tier=parent_decision.tier.value,
+            reasoning=reasoning_full,
+            confidence=composite_confidence,
+            cost=cost,
+            candidates=[],
+            degraded=False,
+            cached=False,
+            trust=parent_decision.model.trust,
+            verifier=None,
+            ledger_id=ledger_id,
+        )
+        try:
+            object.__setattr__(result, "_provider_response", composite)
+        except Exception:
+            pass
+        return result
 
-        return composite
+    # -- Backward-compat helpers (1.0.x callers) ---------------------------
+    async def _generate_and_check(self, query, analysis, query_features, decision):
+        return await self._generate_and_check_v11(query, analysis, query_features, decision)
+
+    async def _route_decomposed(
+        self, query, query_features, analysis, parent_decision, sub_queries
+    ):
+        # Legacy returns ProviderResponse for old callers.
+        result = await self._route_decomposed_v11(
+            query, query_features, analysis, parent_decision, "", sub_queries
+        )
+        try:
+            return result._provider_response or ProviderResponse(
+                content=result.response, model_used=result.model, provider="decomposed"
+            )
+        except Exception:
+            return ProviderResponse(
+                content=result.response, model_used=result.model, provider="decomposed"
+            )
 
     def _finish_route(
+        self, query, query_features, analysis, decision, response, confidence, fallback_count
+    ) -> None:
+        cost = self._route_cost(response, decision.model, confidence)
+        self._finish_route_v11(
+            query,
+            query_features,
+            analysis,
+            decision,
+            response,
+            confidence,
+            fallback_count,
+            cost,
+            0.0,
+            None,
+            bool(getattr(decision, "degraded", False)),
+        )
+
+    def _finish_route_v11(
         self,
-        query: str,
-        query_features: QueryFeatures,
-        analysis: QueryAnalysis,
-        decision: RoutingDecision,
-        response: ProviderResponse,
-        confidence: ConfidenceResult,
-        fallback_count: int,
+        query,
+        query_features,
+        analysis,
+        decision,
+        response,
+        confidence,
+        fallback_count,
+        cost,
+        reward,
+        policy_ctx,
+        degraded,
     ) -> None:
         tracking = self.config.get_tracking_config()
         log_queries = tracking.get("log_queries", True)
-
         if log_queries:
             self.memory.record(
                 query=query,
@@ -328,9 +1036,14 @@ class ModelHop:
                 fallback_used=fallback_count > 0,
             )
             self.adaptive_threshold.adjust(confidence.score)
-
-        cost = self._route_cost(response, decision.model, confidence)
-
+            # Bandit + calibration learning loop.
+            try:
+                if self.bandit is not None and policy_ctx is not None:
+                    self.bandit.update(decision.model, policy_ctx, reward)
+                    if self._store is not None:
+                        self.bandit.save(self._store)
+            except Exception:
+                pass
         if log_queries:
             trace = self.trace_logger.log(
                 query=query,
@@ -340,9 +1053,13 @@ class ModelHop:
                 confidence=confidence,
                 cost=cost,
                 fallback_count=fallback_count,
+                degraded=degraded,
+                policy_version=self.policy_version,
             )
             self.shield.check_quality(trace)
-            self.hop_score.update(confidence.is_confident)
+            self.hop_score.update(
+                is_optimal_hop(confidence.is_confident, cost.savings, cost.would_have_cost)
+            )
 
     def _get_consensus_provider(self, exclude_model: str):
         for name, provider in self.registry.get_available_providers().items():
@@ -350,12 +1067,7 @@ class ModelHop:
                 return provider
         return None
 
-    def _next_fallback_decision(
-        self,
-        current_decision: RoutingDecision,
-        tried_models,
-        analysis: Optional[QueryAnalysis] = None,
-    ) -> Optional[RoutingDecision]:
+    def _next_fallback_decision(self, current_decision, tried_models, analysis=None):
         available = set(self.registry.get_available_providers())
         model = self.fallback.next_candidate(
             current_decision.model, analysis, set(tried_models), available
@@ -383,23 +1095,31 @@ class ModelHop:
         extra_would = 0.0
         for aux in confidence.auxiliary_responses:
             aux_model = self._resolve_cost_model(aux.model_used, model)
-            aux_cost = estimate_cost(aux, aux_model)
+            aux_cost = estimate_cost(
+                aux,
+                aux_model,
+                price_book=getattr(self.cost_tracker, "price_book", None),
+                all_models=self.models,
+            )
             extra_actual += aux_cost.actual_cost
             extra_would += aux_cost.would_have_cost
         return extra_actual, extra_would
 
-    def _route_cost(
-        self, response: ProviderResponse, model: ModelConfig, confidence: ConfidenceResult
-    ) -> CostAnalysis:
+    def _route_cost(self, response, model, confidence) -> CostAnalysis:
         extra_actual, extra_would = self._confidence_aux_cost(confidence, model)
         if self.config.get_tracking_config().get("log_costs", True):
             return self.cost_tracker.calculate(
                 response, model, extra_actual=extra_actual, extra_would=extra_would
             )
-        base = estimate_cost(response, model)
+        base = estimate_cost(
+            response,
+            model,
+            price_book=getattr(self.cost_tracker, "price_book", None),
+            all_models=self.models,
+        )
         total_actual = base.actual_cost + extra_actual
         total_would = base.would_have_cost + extra_would
-        savings = base.savings + (extra_would - extra_actual)
+        savings = total_would - total_actual
         return CostAnalysis(
             actual_cost=total_actual,
             would_have_cost=total_would,
@@ -407,7 +1127,21 @@ class ModelHop:
             savings_percentage=(savings / total_would * 100) if total_would > 0 else 0,
             model_used=model.name,
             tier=model.tier.value,
+            baseline_model=base.baseline_model,
+            tokens_in=int(getattr(response, "tokens_in", 0) or 0),
+            tokens_out=int(getattr(response, "tokens_out", 0) or 0),
         )
+
+
+def cost_baseline(mh) -> str:
+    try:
+        book = getattr(getattr(mh, "cost_tracker", None), "price_book", None)
+        models = getattr(mh, "models", [])
+        if book is not None and models:
+            return book.baseline_model_name(models)
+    except Exception:
+        pass
+    return ""
 
 
 __all__ = [
@@ -417,8 +1151,10 @@ __all__ = [
     "ComplexityLevel",
     "EmotionalTone",
     "ModelConfig",
+    "TrustProfile",
     "QueryAnalysis",
     "RoutingDecision",
+    "RouteResult",
     "ProviderResponse",
     "ConfidenceResult",
     "CostAnalysis",
@@ -430,8 +1166,10 @@ __all__ = [
     "QueryType",
     "Experience",
     "PerformanceMetrics",
+    "PerformanceCard",
     "ModelProfile",
     "SubQuery",
+    "VerifierResult",
     "QueryAnalyzer",
     "Router",
     "ConfidenceEngine",
@@ -445,9 +1183,12 @@ __all__ = [
     "QueryDecomposer",
     "ModelRegistry",
     "CostTracker",
+    "PriceBook",
     "estimate_cost",
     "TraceLogger",
+    "DecisionLedger",
     "HopScore",
+    "is_optimal_hop",
     "Shield",
     "Hub",
 ]
