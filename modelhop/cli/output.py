@@ -1,11 +1,10 @@
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from .._version import get_version
-from .display import tier_color, tier_emoji
+from .display import get_console, is_plain_output, tier_color, tier_emoji
 
-console = Console()
+console = get_console()
 
 
 def print_header() -> None:
@@ -147,7 +146,10 @@ def print_distribution(distribution: dict) -> None:
     console.print()
     for model, percentage in sorted(distribution.items(), key=lambda x: -x[1]):
         bar_length = int(percentage / 5)
-        bar = ":green_circle:" * bar_length + ":black_circle:" * (20 - bar_length)
+        if is_plain_output():
+            bar = "#" * bar_length + "-" * (20 - bar_length)
+        else:
+            bar = ":green_circle:" * bar_length + ":black_circle:" * (20 - bar_length)
         console.print(f"     {model}: [green]{percentage}%[/green]  {bar}")
     console.print()
 
@@ -168,7 +170,7 @@ def print_hop_score(score: int) -> None:
 
     console.print(
         Panel(
-            f"[bold {color}]{score}/100[/{color}]  {badge}",
+            f"[bold {color}]{score}/100[/]  {badge}",
             title=":frog: Hop Score",
             border_style=color,
             padding=(0, 2),

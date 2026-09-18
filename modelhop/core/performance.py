@@ -1,11 +1,9 @@
-import json
 import os
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 from .memory import ExperienceMemory
 from .models import ModelProfile, PerformanceMetrics, QueryType
-from .persistence import atomic_write_json
 
 PERF_FILE = "modelhop_performance.json"
 
@@ -13,38 +11,63 @@ PERF_FILE = "modelhop_performance.json"
 class PerformanceTracker:
     """Tracks per-model, per-query-type performance with decay weighting."""
 
-    def __init__(self, memory: ExperienceMemory, data_dir: str = None):
+    def __init__(self, memory: ExperienceMemory, data_dir: str = None, models=None):
         self.memory = memory
         self.data_dir = data_dir or os.getcwd()
         self.profiles: Dict[str, ModelProfile] = {}
         self._decay_half_life_days = 30
+        self._models_by_name: Dict[str, object] = {}
+        if models:
+            self.set_models(models)
         self._load()
 
     def _get_path(self) -> str:
         return os.path.join(self.data_dir, PERF_FILE)
 
+    def _store(self):
+        from .persistence import SignedStore
+
+        return SignedStore(schema_version=1)
+
     def _load(self):
+        from .persistence import StateIntegrityError
+
         path = self._get_path()
         if not os.path.exists(path):
             return
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            try:
+                data = self._store().load(path)
+            except StateIntegrityError:
+                import warnings
+
+                warnings.warn(f"Performance store {path} failed integrity check; resetting.")
+                return
+            if not isinstance(data, dict):
+                return
             for name, profile_data in data.get("profiles", {}).items():
-                profile = ModelProfile(**profile_data)
+                try:
+                    profile = ModelProfile(**profile_data)
+                except Exception:
+                    continue
                 self.profiles[name] = profile
         except Exception:
             pass
 
     def _persist(self):
+        from .persistence import atomic_write_json as _atomic
+
         path = self._get_path()
         data = {"version": "1.0", "profiles": {}}
         for name, profile in self.profiles.items():
             data["profiles"][name] = profile.model_dump()
         try:
-            atomic_write_json(path, data)
+            self._store().save(path, data)
         except Exception:
-            pass
+            try:
+                _atomic(path, data)
+            except Exception:
+                pass
 
     def rebuild_from_memory(self):
         self.profiles.clear()
@@ -54,44 +77,69 @@ class PerformanceTracker:
             self._update_from_experience(exp)
         self._persist()
 
-    def _update_from_experience(self, exp):
-        model_name = exp.model_name
-        if model_name not in self.profiles:
-            self.profiles[model_name] = ModelProfile(
-                name=model_name,
-                query_type=exp.query_type,
-            )
+    def set_models(self, models) -> None:
+        self._models_by_name = {m.name: m for m in (models or [])}
+        for name, cfg in self._models_by_name.items():
+            if name in self.profiles:
+                try:
+                    self.profiles[name].provider = cfg.provider
+                    self.profiles[name].tier = cfg.tier
+                    self.profiles[name].static_capabilities = list(cfg.capabilities)
+                except Exception:
+                    pass
 
-        profile = self.profiles[model_name]
+    def _ensure_profile(self, model_name: str) -> "ModelProfile":
+        if model_name not in self.profiles:
+            cfg = self._models_by_name.get(model_name)
+            if cfg is not None:
+                try:
+                    self.profiles[model_name] = ModelProfile(
+                        name=model_name,
+                        provider=cfg.provider,
+                        tier=cfg.tier,
+                        static_capabilities=list(cfg.capabilities),
+                    )
+                except Exception:
+                    self.profiles[model_name] = ModelProfile(name=model_name)
+            else:
+                self.profiles[model_name] = ModelProfile(name=model_name)
+        return self.profiles[model_name]
+
+    def _update_from_experience(self, exp):
+        from .models import PerformanceMetrics as _PM
+
+        model_name = exp.model_name
+        profile = self._ensure_profile(model_name)
         qt_key = exp.query_type.value
 
         if qt_key not in profile.performance_by_query_type:
-            profile.performance_by_query_type[qt_key] = PerformanceMetrics().model_dump()
+            profile.performance_by_query_type[qt_key] = _PM().model_dump()
 
         metrics_data = profile.performance_by_query_type[qt_key]
-        metrics = PerformanceMetrics(**metrics_data)
+        metrics = _PM(**metrics_data)
 
         age_days = (datetime.now() - exp.timestamp).days if exp.timestamp else 0
-        weight = 0.5 ** (age_days / self._decay_half_life_days)
+        w = 0.5 ** (age_days / self._decay_half_life_days)
 
-        n = metrics.sample_count
+        W = float(getattr(metrics, "weight_sum", 0.0) or 0.0)
         old_quality = metrics.avg_quality
         old_latency = metrics.avg_latency_ms
 
+        denom = W + w
+        if denom > 0:
+            metrics.avg_quality = (old_quality * W + exp.response_quality * w) / denom
+            metrics.avg_latency_ms = int((old_latency * W + exp.latency_ms * w) / denom)
+            metrics.fallback_rate = (
+                metrics.fallback_rate * W + (w if exp.fallback_used else 0.0)
+            ) / denom
+        metrics.weight_sum = W + w
         metrics.sample_count += 1
-        metrics.avg_quality = (old_quality * n + exp.response_quality * weight) / (n + weight)
-        metrics.avg_latency_ms = int((old_latency * n + exp.latency_ms * weight) / (n + weight))
+        metrics.success_rate = 1.0 - metrics.fallback_rate
 
         if metrics.sample_count > 1:
             metrics.quality_stddev = abs(metrics.avg_quality - old_quality) * 0.3
         else:
             metrics.quality_stddev = 0.0
-
-        total_fallback = metrics.fallback_rate * n
-        if exp.fallback_used:
-            total_fallback += weight
-        metrics.fallback_rate = total_fallback / (n + weight)
-        metrics.success_rate = 1.0 - metrics.fallback_rate
 
         profile.performance_by_query_type[qt_key] = metrics.model_dump()
 
@@ -119,10 +167,7 @@ class PerformanceTracker:
         latency_ms: int,
         fallback_used: bool,
     ):
-        if model_name not in self.profiles:
-            self.profiles[model_name] = ModelProfile(name=model_name)
-
-        profile = self.profiles[model_name]
+        profile = self._ensure_profile(model_name)
         qt_key = query_type.value
 
         if qt_key not in profile.performance_by_query_type:
@@ -131,12 +176,19 @@ class PerformanceTracker:
         metrics_data = profile.performance_by_query_type[qt_key]
         metrics = PerformanceMetrics(**metrics_data)
 
-        n = metrics.sample_count
-        metrics.sample_count = n + 1
-        metrics.avg_quality = (metrics.avg_quality * n + quality) / (n + 1)
-        metrics.avg_latency_ms = int((metrics.avg_latency_ms * n + latency_ms) / (n + 1))
-        total_fallback = metrics.fallback_rate * n + (1.0 if fallback_used else 0.0)
-        metrics.fallback_rate = total_fallback / (n + 1)
+        # Fresh outcomes have weight 1.0; decay applies on age via rebuild path.
+        W = float(getattr(metrics, "weight_sum", 0.0) or 0.0)
+        w = 1.0
+        denom = W + w
+        metrics.avg_quality = (metrics.avg_quality * W + quality * w) / denom if denom else quality
+        metrics.avg_latency_ms = (
+            int((metrics.avg_latency_ms * W + latency_ms * w) / denom) if denom else latency_ms
+        )
+        metrics.fallback_rate = (
+            (metrics.fallback_rate * W + (w if fallback_used else 0.0)) / denom if denom else 0.0
+        )
+        metrics.weight_sum = denom
+        metrics.sample_count += 1
         metrics.success_rate = 1.0 - metrics.fallback_rate
 
         profile.performance_by_query_type[qt_key] = metrics.model_dump()

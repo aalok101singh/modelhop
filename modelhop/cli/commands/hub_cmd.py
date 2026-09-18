@@ -1,11 +1,13 @@
 import json as json_mod
+from typing import Optional
 
 import click
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-console = Console()
+from ..display import get_console
+
+console = get_console()
 
 
 @click.group(invoke_without_command=True)
@@ -38,7 +40,7 @@ def list_configs(json_output: bool) -> None:
                     "tags": config.tags,
                 }
             )
-        console.print(json_mod.dumps(output, indent=2))
+        print(json_mod.dumps(output, indent=2))  # noqa: T201 - raw JSON, no rich wrap
     else:
         if not configs:
             console.print()
@@ -87,13 +89,21 @@ def list_configs(json_output: bool) -> None:
 
 @hub.command("download")
 @click.argument("name")
-@click.option("--destination", "-d", default="modelhop.yaml", help="Destination file")
-def download(name: str, destination: str) -> None:
+@click.option(
+    "--destination",
+    "-d",
+    default=None,
+    help="Destination file (default: <name>.yaml; never overwrites modelhop.yaml)",
+)
+def download(name: str, destination: Optional[str]) -> None:
     """:frog: Download a community config."""
     from modelhop.hub.hub import Hub
 
     hub_instance = Hub()
-    success = hub_instance.download_config(name, destination)
+    # Never clobber the live config by default; download_config sanitizes.
+    target = destination or f"{name}.yaml"
+    success = hub_instance.download_config(name, target)
+    destination = target
 
     if success:
         console.print()

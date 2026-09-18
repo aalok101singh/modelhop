@@ -114,6 +114,32 @@ def make_analysis():
     return _make
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_secret_env(monkeypatch):
+    """Keep the suite hermetic: a real `.env` in the repo root (created by
+    `modelhop setup`) must not leak live keys into tests, and mid-test
+    `.env` reloads from the repo CWD must not re-inject them.
+
+    Tests that need keys set them explicitly via monkeypatch.setenv.
+    """
+    for name in (
+        "GROQ_API_KEY",
+        "GEMINI_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "MODELHOP_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    try:
+        import modelhop.config as _config_mod
+        import modelhop.core.secrets as _secrets_mod
+
+        monkeypatch.setattr(_config_mod, "_load_env_file", lambda *a, **k: None)
+        monkeypatch.setattr(_secrets_mod, "_load_env_file", lambda *a, **k: None)
+    except Exception:
+        pass
+
+
 @pytest.fixture
 def make_trace(sample_models):
     def _make(score, query="test query", threshold=0.7):

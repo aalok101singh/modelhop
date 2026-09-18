@@ -1,73 +1,40 @@
 import asyncio
 
 import click
-from rich.console import Console
 from rich.panel import Panel
 
-console = Console(force_terminal=True)
+from ..display import get_console
+from ..provider_errors import test_connection
+
+console = get_console(force_terminal=True)
 
 PROBE_TIMEOUT = 5
 
 
-async def _test_groq(api_key: str, model: str) -> bool:
-    from groq import AsyncGroq
-
-    client = AsyncGroq(api_key=api_key, max_retries=0)
-    await asyncio.wait_for(
-        client.chat.completions.create(
-            model=model, messages=[{"role": "user", "content": "Hi"}], max_tokens=5
-        ),
-        timeout=PROBE_TIMEOUT,
-    )
-    return True
-
-
-async def _test_gemini(api_key: str, model: str) -> bool:
-    import google.generativeai as genai
-
-    genai.configure(api_key=api_key)
-    m = genai.GenerativeModel(model)
-    await asyncio.wait_for(m.generate_content_async("Hi"), timeout=PROBE_TIMEOUT)
-    return True
-
-
-async def _test_openai(api_key: str, model: str) -> bool:
-    from openai import AsyncOpenAI
-
-    client = AsyncOpenAI(api_key=api_key, max_retries=0, timeout=PROBE_TIMEOUT)
-    await client.chat.completions.create(
-        model=model, messages=[{"role": "user", "content": "Hi"}], max_tokens=5
-    )
-    return True
-
-
-async def _probe_provider(provider: str, api_key: str, model: str) -> bool:
+async def _probe_provider(provider: str, api_key: str, model: str) -> tuple:
+    """Returns (ok, detail) using the shared probe with honest error reasons."""
     try:
-        if provider == "groq":
-            return await _test_groq(api_key, model)
-        elif provider == "gemini":
-            return await _test_gemini(api_key, model)
-        elif provider == "openai":
-            return await _test_openai(api_key, model)
+        return await test_connection(provider, api_key, model, timeout=PROBE_TIMEOUT)
     except Exception:
-        return False
-    return False
+        return False, "probe failed"
 
 
 @click.command()
 def welcome() -> None:
     """:frog: Welcome to ModelHop - quick setup guide."""
-    import os
     from pathlib import Path
 
     from modelhop.config import Config
+    from modelhop.core.secrets import EnvSecretsProvider
+
+    _secrets = EnvSecretsProvider()
 
     console.print()
     console.print(
         Panel(
             "[bold green]:frog: Welcome to ModelHop![/bold green]\n\n"
             "ModelHop routes your LLM queries to the [bold]cheapest capable model[/bold],\n"
-            "saving you 60-90%% on API costs while maintaining quality.",
+            "saving you 60-90% on API costs while maintaining quality.",
             border_style="green",
             padding=(0, 2),
         )
@@ -87,7 +54,7 @@ def welcome() -> None:
     async def _run_all_probes():
         results = {}
         for provider, m in seen_providers.items():
-            api_key = os.environ.get(m.api_key_env, "")
+            api_key = _secrets.get(m.api_key_env) or ""
             if not api_key:
                 results[provider] = None
                 continue
@@ -98,16 +65,20 @@ def welcome() -> None:
 
     any_key_found = False
     for provider, m in seen_providers.items():
-        api_key = os.environ.get(m.api_key_env, "")
+        api_key = _secrets.get(m.api_key_env) or ""
         if not api_key:
             continue
         any_key_found = True
-        ok = results.get(provider)
+        probed = results.get(provider)
+        ok = probed[0] if probed else False
+        detail = probed[2] if probed and len(probed) > 2 else ""
         provider_upper = provider.upper()
         if ok:
             checks.append(
                 f"[green]:white_check_mark: {provider_upper} connected ({m.model})[/green]"
             )
+        elif detail:
+            checks.append(f"[red]:x: {provider_upper} {detail} (model {m.model})[/red]")
         else:
             checks.append(
                 f"[red]:x: {provider_upper} key invalid or model {m.model} unreachable[/red]"
