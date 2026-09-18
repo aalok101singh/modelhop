@@ -48,7 +48,7 @@ class CascadeFallback:
                 for m in self.tier_models.get(tier, [])
                 if m.name not in tried
                 and (not available or m.name in available)
-                and (not required or required & set(m.capabilities))
+                and (not required or required.issubset(set(m.capabilities)))
             ]
             candidates.sort(key=lambda m: (m.cost_per_1k_input + m.cost_per_1k_output, m.name))
             if candidates:

@@ -69,8 +69,10 @@ def model_satisfies(
             required_dc = [required_dc]
         model_dc = set(trust.data_classes or ["general"])
         for dc in required_dc:
-            if dc not in model_dc and "general" not in model_dc and dc != "general":
-                # Permissive: if model declares only general, allow general queries.
+            if dc not in model_dc:
+                # Strict: a default `general` model does not satisfy an
+                # explicitly required non-general class. `general`
+                # requirements pass since every default contains it.
                 return False, f"{model.name} lacks data class {dc}"
     return True, None
 

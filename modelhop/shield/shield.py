@@ -91,8 +91,14 @@ class Shield:
                 conf = float(payload.get("confidence", 0.0))
             except (TypeError, ValueError):
                 continue
+            # Preserve consensus so restarted shields do not report false zero.
+            try:
+                consensus = payload.get("consensus_score")
+                consensus = float(consensus) if consensus is not None else None
+            except (TypeError, ValueError):
+                consensus = None
             # Synthesize a minimal trace-like record for degradation stats.
-            self.history.append(_LiteTrace(confidence=conf))  # type: ignore
+            self.history.append(_LiteTrace(confidence=conf, consensus_score=consensus))  # type: ignore
             count += 1
         # Bound history.
         self.history = self.history[-500:]
@@ -123,9 +129,16 @@ class Shield:
         try:
             if isinstance(item, TraceEntry):
                 return float(item.confidence.score)
-            return float(getattr(item, "confidence", 0.0))
+            return float(getattr(item.confidence, "score", getattr(item, "confidence", 0.0)))
         except (TypeError, ValueError, AttributeError):
             return 0.0
+
+    def _consensus_of(self, item) -> Optional[float]:
+        try:
+            conf = getattr(item, "confidence", None)
+            return getattr(conf, "consensus_score", None)
+        except AttributeError:
+            return None
 
     def _detect_degradation(self) -> bool:
         if len(self.history) < 10:
@@ -144,11 +157,8 @@ class Shield:
         quality_score = sum(self._score_of(t) for t in self.history) / len(self.history)
         consensus_count = 0
         for t in self.history:
-            try:
-                if isinstance(t, TraceEntry) and t.confidence.consensus_score is not None:
-                    consensus_count += 1
-            except AttributeError:
-                pass
+            if self._consensus_of(t) is not None:
+                consensus_count += 1
         consensus_rate = consensus_count / len(self.history) if self.history else 1.0
         return ShieldStatus(
             active=True,
@@ -175,12 +185,12 @@ class Shield:
 
 
 class _LiteTrace:
-    def __init__(self, confidence: float):
-        self.confidence = _LiteConf(confidence)
+    def __init__(self, confidence: float, consensus_score: Optional[float] = None):
+        self.confidence = _LiteConf(confidence, consensus_score)
         self.query = ""
 
 
 class _LiteConf:
-    def __init__(self, score: float):
+    def __init__(self, score: float, consensus_score: Optional[float] = None):
         self.score = score
-        self.consensus_score = None
+        self.consensus_score = consensus_score

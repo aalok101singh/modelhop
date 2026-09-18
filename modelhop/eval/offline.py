@@ -6,13 +6,12 @@ from typing import List
 
 
 def _behavior_propensity(row: dict) -> float | None:
-    """Propensity of the logging policy. None only when the field is absent.
+    """Propensity of the logging policy. None when absent or without support.
 
-    An explicit zero means zero support: callers must exclude the row rather
-    than fabricate certainty from it.
+    Missing propensity must exclude the row rather than fabricate certainty.
     """
     if "propensity" not in row or row.get("propensity") is None:
-        return 1.0
+        return None
     try:
         pi_b = float(row["propensity"])
     except (TypeError, ValueError):

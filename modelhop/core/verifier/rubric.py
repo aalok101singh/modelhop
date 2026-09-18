@@ -21,6 +21,23 @@ Return ONLY JSON: {{"pass": <true|false>, "score": <0.0-1.0>, "reason": "<brief>
 """
 
 
+def _parse_judge_pass(value, fallback: bool) -> bool:
+    """Strict boolean parsing: string "false" must not pass via bool()."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return fallback
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if s in ("true", "1", "yes", "y", "pass"):
+            return True
+        if s in ("false", "0", "no", "n", "fail", "failed"):
+            return False
+    return fallback
+
+
 class RubricVerifier:
     name = "rubric"
 
@@ -58,7 +75,12 @@ class RubricVerifier:
                     details={"reason": "unparseable judge output"},
                 )
             score = float(data.get("score", 0.0))
-            passed = bool(data.get("pass", score >= float(ctx.get("threshold", self.threshold))))
+            threshold = float(ctx.get("threshold", self.threshold))
+            fallback = score >= threshold
+            judge_pass = _parse_judge_pass(data.get("pass", fallback), fallback)
+            # Both signals required: an inconsistent {"pass": true, "score": 0.0}
+            # must not bypass the configured threshold.
+            passed = bool(judge_pass and score >= threshold)
             return VerifierResult(verifier_name=self.name, passed=passed, score=score, details={})
         except Exception as exc:
             return VerifierResult(

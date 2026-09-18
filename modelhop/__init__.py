@@ -1,6 +1,6 @@
 import hashlib
 import json as json_mod
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .config import Config
 from .core.adaptive_threshold import AdaptiveThreshold
@@ -337,13 +337,17 @@ class ModelHop:
                         query=query,
                         cache_key=cache_key,
                         trust_required=trust_required,
+                        context=context,
                     )
             except Exception:
                 pass
         if self.semantic_cache is not None and not cached:
             try:
                 sem = self.semantic_cache.get(
-                    query, policy_version=self.policy_version, tenant=tenant
+                    query,
+                    policy_version=self.policy_version,
+                    tenant=tenant,
+                    trust_hash=trust_hash,
                 )
                 if sem and sem.get("response"):
                     # Only use semantic hit when raw text storage is allowed.
@@ -362,6 +366,7 @@ class ModelHop:
                         cache_key=cache_key,
                         trust_required=trust_required,
                         semantic=True,
+                        context=context,
                     )
             except Exception:
                 pass
@@ -401,14 +406,17 @@ class ModelHop:
                     bandit_score=bandit_score,
                 )
 
-        # Budget pre-check.
+        # Budget pre-check (input + output estimate, tokens, calls, latency).
         if session is not None:
             try:
-                est = (policy_ctx.estimated_tokens_in / 1000) * decision.model.cost_per_1k_input
-                ok, reason = session.check_allow(est_cost=est)
+                est_tokens = int(policy_ctx.estimated_tokens_in or 0)
+                est = (est_tokens / 1000) * (
+                    decision.model.cost_per_1k_input + decision.model.cost_per_1k_output
+                )
+                ok, reason = session.check_allow(est_cost=est, est_tokens=est_tokens)
                 if not ok:
                     degraded = True
-                    if self.fail_closed and "budget" in reason:
+                    if self.fail_closed:
                         raise RuntimeError(f"Request refused: session {reason}")
             except RuntimeError:
                 raise
@@ -425,10 +433,15 @@ class ModelHop:
             policy_ctx=policy_ctx,
         )
         # Verifier gate (generic): fail => escalate once to safest trusted model.
+        # Async path preferred so rubric judges actually execute.
         verifier_result = None
         if self.verifier is not None and getattr(self.verifier, "verifiers", []):
             try:
-                verifier_result = self.verifier.verify(query, response.content, context)
+                averify_fn = getattr(self.verifier, "averify", None)
+                if callable(averify_fn):
+                    verifier_result = await averify_fn(query, response.content, context)
+                else:
+                    verifier_result = self.verifier.verify(query, response.content, context)
                 if not verifier_result.passed:
                     esc = self._safest_trusted(candidates, trust_required)
                     if esc is not None and esc.name != decision.model.name:
@@ -436,9 +449,14 @@ class ModelHop:
                         if provider is not None:
                             try:
                                 response = await provider.generate(query)
-                                verifier_result = self.verifier.verify(
-                                    query, response.content, context
-                                )
+                                if callable(averify_fn):
+                                    verifier_result = await averify_fn(
+                                        query, response.content, context
+                                    )
+                                else:
+                                    verifier_result = self.verifier.verify(
+                                        query, response.content, context
+                                    )
                                 decision = RoutingDecision(
                                     model=esc,
                                     tier=esc.tier,
@@ -518,6 +536,8 @@ class ModelHop:
                     "model": decision.model.name,
                     "tier": decision.tier.value,
                     "confidence": confidence.score,
+                    "consensus_score": getattr(confidence, "consensus_score", None),
+                    "propensity": 1.0,
                     "cost": cost.actual_cost,
                     "degraded": degraded,
                     "policy_version": self.policy_version,
@@ -539,6 +559,7 @@ class ModelHop:
             policy_ctx,
             degraded,
             ledger_id=ledger_id,
+            trust_required=trust_required,
         )
         # OTel export (best-effort).
         try:
@@ -577,6 +598,7 @@ class ModelHop:
                         decision.model.name,
                         policy_version=self.policy_version,
                         tenant=tenant,
+                        trust_hash=trust_hash,
                     )
         except Exception:
             pass
@@ -669,6 +691,7 @@ class ModelHop:
         cache_key=None,
         trust_required=None,
         semantic: bool = False,
+        context: Optional[dict] = None,
     ) -> RouteResult:
         model_name = hit.get("model", decision.model.name)
         model = self.registry.get_model(model_name) or decision.model
@@ -680,6 +703,40 @@ class ModelHop:
             eligible, _ = filter_by_trust([model], self.trust_policy, trust_required or {})
             if not eligible:
                 raise _CacheTrustMiss(f"cached model {model.name} fails current trust requirements")
+        except _CacheTrustMiss:
+            raise
+        except Exception:
+            pass
+        # Policy re-check: cached model must still satisfy current budget,
+        # cost, latency, capability, and health constraints.
+        try:
+            if self.policy_engine is not None:
+                from .core.policy.engine import PolicyContext as _CachePolicyContext
+
+                _ctx = context or {}
+                _qtype = "general"
+                try:
+                    _qtype = query_features.query_type.value
+                except Exception:
+                    _qtype = "general"
+                ctx = _CachePolicyContext(
+                    query_type=_qtype,
+                    complexity=float(getattr(analysis, "complexity", 0.0) or 0.0),
+                    budget_remaining=None,
+                    cost_ceiling=_ctx.get("cost_ceiling"),
+                    latency_slo_ms=_ctx.get("latency_slo_ms"),
+                    trust_required=trust_required or {},
+                    tenant_tier=str(_ctx.get("tenant_tier", "default")),
+                    capabilities_needed=list(getattr(analysis, "capabilities_needed", []) or []),
+                    estimated_tokens_in=int(getattr(analysis, "estimated_tokens", 100) or 100),
+                )
+                res = self.policy_engine.evaluate([model], ctx)
+                if not res.eligible:
+                    raise _CacheTrustMiss(
+                        f"cached model {model.name} fails current policy: {res.excluded}"
+                    )
+                if not self.health.allow(model.name):
+                    raise _CacheTrustMiss(f"cached model {model.name} temporarily unhealthy")
         except _CacheTrustMiss:
             raise
         except Exception:
@@ -1094,12 +1151,24 @@ class ModelHop:
                     {
                         "query": query[:500],
                         "model": "decomposed",
+                        "tier": parent_decision.tier.value,
                         "confidence": composite_confidence.score,
+                        "consensus_score": getattr(composite_confidence, "consensus_score", None),
+                        "propensity": 1.0,
+                        "cost": cost.actual_cost,
+                        "degraded": bool(
+                            getattr(parent_decision, "degraded", False)
+                            or not composite_confidence.is_confident
+                        ),
+                        "policy_version": self.policy_version,
                     }
                 )
                 ledger_id = f"{entry.get('seq','')}:{entry.get('payload_hash','')[:12]}"
             except Exception:
                 pass
+            allow_text = not (
+                isinstance(trust_required, dict) and trust_required.get("no_raw_cache")
+            )
             trace = self.trace_logger.log(
                 query=query,
                 analysis=analysis,
@@ -1109,6 +1178,7 @@ class ModelHop:
                 cost=cost,
                 fallback_count=total_fallback,
                 ledger_id=ledger_id or None,
+                allow_text=allow_text,
             )
             self.shield.check_quality(trace)
             self.hop_score.update(
@@ -1116,6 +1186,61 @@ class ModelHop:
                     composite_confidence.is_confident, cost.savings, cost.would_have_cost
                 )
             )
+        # Session accounting for decomposed aggregates (budget/calls/tokens/latency).
+        decomposed_degraded = bool(
+            getattr(parent_decision, "degraded", False) or not composite_confidence.is_confident
+        )
+        if session is not None:
+            try:
+                ok, reason = session.check_allow(
+                    est_cost=float(cost.actual_cost),
+                    est_tokens=int(tokens_in + tokens_out),
+                )
+                if not ok and self.fail_closed:
+                    raise RuntimeError(f"Request refused: session {reason}")
+                if not ok:
+                    decomposed_degraded = True
+            except RuntimeError:
+                raise
+            except Exception:
+                pass
+            try:
+                session.record(
+                    float(cost.actual_cost),
+                    int(tokens_in + tokens_out),
+                    int(total_latency),
+                )
+            except Exception:
+                pass
+        # Cache population for decomposed responses (privacy-gated).
+        try:
+            allow_text = not (
+                isinstance(trust_required, dict) and trust_required.get("no_raw_cache")
+            )
+            if allow_text:
+                tenant = _tenant_of(context or {})
+                trust_hash = _trust_digest(trust_required)
+                if self.exact_cache is not None and cache_key:
+                    self.exact_cache.put(
+                        cache_key,
+                        {
+                            "response": composite_text,
+                            "model": "decomposed",
+                            "tier": parent_decision.tier.value,
+                            "policy_version": self.policy_version,
+                        },
+                    )
+                if self.semantic_cache is not None:
+                    self.semantic_cache.put(
+                        query,
+                        composite_text,
+                        "decomposed",
+                        policy_version=self.policy_version,
+                        tenant=tenant,
+                        trust_hash=trust_hash,
+                    )
+        except Exception:
+            pass
         reasoning_full = self.reasoning_engine.explain(
             query=query,
             analysis=analysis,
@@ -1131,7 +1256,7 @@ class ModelHop:
             confidence=composite_confidence,
             cost=cost,
             candidates=[],
-            degraded=False,
+            degraded=decomposed_degraded,
             cached=False,
             trust=parent_decision.model.trust,
             verifier=None,
@@ -1195,6 +1320,7 @@ class ModelHop:
         policy_ctx,
         degraded,
         ledger_id: str = "",
+        trust_required: Optional[dict] = None,
     ) -> None:
         tracking = self.config.get_tracking_config()
         log_queries = tracking.get("log_queries", True)
@@ -1225,6 +1351,9 @@ class ModelHop:
             except Exception:
                 pass
         if log_queries:
+            allow_text = not (
+                isinstance(trust_required, dict) and trust_required.get("no_raw_cache")
+            )
             trace = self.trace_logger.log(
                 query=query,
                 analysis=analysis,
@@ -1236,6 +1365,7 @@ class ModelHop:
                 degraded=degraded,
                 ledger_id=ledger_id or None,
                 policy_version=self.policy_version,
+                allow_text=allow_text,
             )
             self.shield.check_quality(trace)
             self.hop_score.update(

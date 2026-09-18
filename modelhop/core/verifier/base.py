@@ -46,3 +46,33 @@ class VerifierPipeline:
                     details=details,
                 )
         return VerifierResult(verifier_name="pipeline", passed=True, score=1.0, details=details)
+
+    async def averify(self, query: str, response: str, ctx: dict | None = None) -> VerifierResult:
+        """Async pipeline: prefers verifier.averify() when present (rubric judge)."""
+        ctx = ctx or {}
+        if not self.verifiers:
+            return VerifierResult(verifier_name="pipeline", passed=True, score=1.0, details={})
+        details: dict = {}
+        for verifier in self.verifiers:
+            try:
+                averify_fn = getattr(verifier, "averify", None)
+                if callable(averify_fn):
+                    result = await averify_fn(query, response, ctx)
+                else:
+                    result = verifier.verify(query, response, ctx)
+            except Exception as exc:  # fail-closed on verifier crash
+                return VerifierResult(
+                    verifier_name=getattr(verifier, "name", "unknown"),
+                    passed=False,
+                    score=0.0,
+                    details={"error": str(exc)},
+                )
+            details[result.verifier_name] = {"passed": result.passed, "score": result.score}
+            if not result.passed:
+                return VerifierResult(
+                    verifier_name=result.verifier_name,
+                    passed=False,
+                    score=result.score,
+                    details=details,
+                )
+        return VerifierResult(verifier_name="pipeline", passed=True, score=1.0, details=details)

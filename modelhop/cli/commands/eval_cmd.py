@@ -32,15 +32,45 @@ async def _offline_async(json_output: bool) -> None:
     logged = []
     try:
         for payload in mh.ledger.replay():
+            propensity = payload.get("propensity")
+            if propensity is None:
+                continue
+            try:
+                propensity = float(propensity)
+            except (TypeError, ValueError):
+                continue
+            if propensity <= 0:
+                continue
             logged.append(
                 {
                     "reward": float(payload.get("confidence", 0.0)),
-                    "propensity": 1.0,
+                    "propensity": propensity,
                     "model": payload.get("model", ""),
                 }
             )
     except Exception:
         pass
+    if not logged:
+        if json_output:
+            print(
+                json_mod.dumps(
+                    {
+                        "n": 0,
+                        "ips": 0.0,
+                        "doubly_robust": 0.0,
+                        "warning": "no propensity data; refusing to report fabricated estimates",
+                    },
+                    indent=2,
+                )
+            )  # noqa: T201
+        else:
+            console.print(
+                Panel(
+                    "No propensity data in ledger; refusing to report fabricated estimates.",
+                    title=":frog: Offline Eval",
+                )
+            )
+        return
     ips = ips_estimate(logged, lambda row: 1.0)
     dr = doubly_robust(logged, lambda row: 1.0, lambda row: float(row.get("reward", 0.0)))
     if json_output:

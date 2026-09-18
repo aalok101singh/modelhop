@@ -35,6 +35,7 @@ class SemanticEntry:
     policy_version: str
     text_hash: str = ""
     tenant: str = "default"
+    trust_hash: str = ""
 
 
 class SemanticCache:
@@ -94,6 +95,7 @@ class SemanticCache:
         model: str,
         policy_version: str = "1",
         tenant: str = "default",
+        trust_hash: str = "",
     ) -> None:
         vec = self._vector(query)
         text_hash = hashlib.sha256(query.encode()).hexdigest()
@@ -105,6 +107,7 @@ class SemanticCache:
                 policy_version=policy_version,
                 text_hash=text_hash,
                 tenant=tenant or "default",
+                trust_hash=trust_hash or "",
             )
         )
 
@@ -113,6 +116,7 @@ class SemanticCache:
         query: str,
         policy_version: Optional[str] = None,
         tenant: str = "default",
+        trust_hash: Optional[str] = None,
     ) -> Optional[dict]:
         if not self.entries:
             return None
@@ -123,6 +127,8 @@ class SemanticCache:
             if policy_version is not None and entry.policy_version != policy_version:
                 continue
             if (entry.tenant or "default") != (tenant or "default"):
+                continue
+            if trust_hash is not None and (entry.trust_hash or "") != trust_hash:
                 continue
             score = self._cosine(vec, entry.vector)
             if score > best_score:
