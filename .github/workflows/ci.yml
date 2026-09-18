@@ -105,3 +105,31 @@ jobs:
       - name: Security tests (injection, tamper, k-anonymity)
         run: |
           pytest tests/test_security_v11.py tests/test_trust.py -q
+
+  gate:
+    # Single required status check for branch protection: green only when
+    # every CI job (all 15 test-matrix legs included) succeeded.
+    # NOTE: no `name:` field here — GitHub reports the job id (`gate`) as
+    # the check context, which is exactly what protection requires.
+    runs-on: ubuntu-latest
+    needs: [test, lint, audit, cli-smoke, security]
+    if: always()
+    steps:
+      - name: Verify all required jobs passed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python - <<'EOF'
+          import json
+          import os
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          failed = {
+              name: info.get("result")
+              for name, info in needs.items()
+              if info.get("result") != "success"
+          }
+          if failed:
+              raise SystemExit(f"gate blocked, non-success jobs: {failed}")
+          print("gate: all required jobs succeeded")
+          EOF
