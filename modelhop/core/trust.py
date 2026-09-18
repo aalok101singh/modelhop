@@ -38,12 +38,18 @@ def model_satisfies(
     req.update(requirement or {})
     trust = model.trust
 
-    # ZDR
+    # ZDR: accept the documented `zdr` alias alongside `require_zdr`.
+    if req.get("zdr") and not req.get("require_zdr"):
+        req["require_zdr"] = True
     if req.get("require_zdr") and not trust.zdr:
         return False, f"{model.name} is not zero-data-retention"
-    # Jurisdiction allowlist: enforced only when both sides declare.
+    # Jurisdiction allowlist: when requested, the model must declare a
+    # jurisdiction AND it must be allowed. Unknown regions do not pass.
+    # (No allowlist requested => permissive, sparse metadata never blocks.)
     allowed = req.get("allowed_jurisdictions") or req.get("jurisdiction_allowlist")
-    if allowed and trust.jurisdiction:
+    if allowed:
+        if not trust.jurisdiction:
+            return False, f"{model.name} declares no jurisdiction (allowlist {list(allowed)})"
         if trust.jurisdiction not in allowed:
             return False, f"{model.name} jurisdiction {trust.jurisdiction} not allowed"
     # Sensitivity: model must handle at least the required level.

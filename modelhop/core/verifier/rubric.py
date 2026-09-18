@@ -35,10 +35,11 @@ class RubricVerifier:
         ctx = ctx or {}
         provider = ctx.get("provider", self.provider)
         if provider is None:
+            # Fail-closed: an unrunnable judge abstains, it never passes.
             return VerifierResult(
                 verifier_name=self.name,
-                passed=True,
-                score=1.0,
+                passed=False,
+                score=0.0,
                 details={"note": "no judge; skipped"},
             )
         prompt = RUBRIC_PROMPT.format(
@@ -65,7 +66,7 @@ class RubricVerifier:
             )
 
     def verify(self, query: str, response: str, ctx: dict | None = None) -> VerifierResult:
-        # Sync path: skip (no judge available synchronously).
+        # Sync path: no judge can run here. Fail closed (abstain, never pass).
         return VerifierResult(
-            verifier_name=self.name, passed=True, score=1.0, details={"note": "sync skip"}
+            verifier_name=self.name, passed=False, score=0.0, details={"note": "sync skip"}
         )

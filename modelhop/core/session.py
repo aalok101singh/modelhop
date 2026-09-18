@@ -77,5 +77,12 @@ class SessionManager:
     def get(self, session_id: str) -> Optional[TaskSession]:
         return self.sessions.get(session_id)
 
+    def get_by_task(self, task_id: str) -> Optional[TaskSession]:
+        """Reuse the live session for a task so budgets/counters accumulate."""
+        for session in self.sessions.values():
+            if session.task_id == task_id:
+                return session
+        return None
+
     def end(self, session_id: str) -> Optional[TaskSession]:
         return self.sessions.pop(session_id, None)

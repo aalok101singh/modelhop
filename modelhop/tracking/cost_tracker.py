@@ -185,12 +185,19 @@ class CostTracker:
         model: ModelConfig,
         extra_actual: float = 0.0,
         extra_would: float = 0.0,
+        extra_aux_calls: int = 0,
     ) -> CostAnalysis:
         book = self._effective_book()
         base = estimate_cost(response, model, price_book=book, all_models=self.all_models or None)
         total_actual = base.actual_cost + extra_actual
         total_would = base.would_have_cost + extra_would
         savings = total_would - total_actual
+        # Single counting point: this call's aux feeds the lifetime totals
+        # once, and the analysis carries per-route (not cumulative) aux.
+        new_count = int(extra_aux_calls or 0)
+        new_cost = float(extra_actual or 0.0)
+        self.aux_calls += new_count
+        self.aux_cost_total += new_cost
 
         analysis = CostAnalysis(
             actual_cost=total_actual,
@@ -200,8 +207,8 @@ class CostTracker:
             model_used=model.name,
             tier=model.tier.value,
             baseline_model=base.baseline_model,
-            aux_calls=self.aux_calls,
-            aux_cost=self.aux_cost_total + extra_actual,
+            aux_calls=new_count,
+            aux_cost=new_cost,
             tokens_in=int(getattr(response, "tokens_in", 0) or 0),
             tokens_out=int(getattr(response, "tokens_out", 0) or 0),
         )

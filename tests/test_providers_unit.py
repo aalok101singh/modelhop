@@ -182,8 +182,9 @@ async def test_gemini_generate(monkeypatch):
             captured.update(kw)
 
     class FakeModel:
-        async def generate_content_async(self, prompt, generation_config=None):
+        async def generate_content_async(self, prompt, generation_config=None, tools=None):
             captured["prompt"] = prompt
+            captured["tools_arg"] = tools
             return SimpleNamespace(
                 text="gemini says hi",
                 usage_metadata=SimpleNamespace(prompt_token_count=2, candidates_token_count=3),
@@ -205,7 +206,9 @@ async def test_gemini_generate(monkeypatch):
     assert out.content == "gemini says hi"
     assert out.tokens_in == 2 and out.tokens_out == 3
     assert out.provider == "gemini"
-    assert captured["tools"] == [{"type": "t"}]
+    # tools travel as a request field, never inside GenerationConfig.
+    assert captured["tools_arg"] == [{"type": "t"}]
+    assert "tools" not in captured
     assert captured["prompt"] == "hi"
     chunks = [c async for c in p.stream("hi")]
     assert "".join(chunks) == "gemini says hi"

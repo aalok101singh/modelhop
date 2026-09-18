@@ -45,6 +45,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `os.getenv` line removed; `.gitattributes` normalizes line endings;
   `test_w4` spec path anchored to repo root; `test_v11_core` stubs embedding
   loads for hermetic runs
+- Qodo review (21 findings) fixes: serve auth fails closed on secret-backend
+  errors; fallbacks and decomposed subqueries stay inside policy-eligible
+  sets; `zdr` alias honored; jurisdiction allowlists reject unknown regions;
+  `no_raw_cache` gates all persistence; task sessions reused by `task_id`;
+  aux costs counted once (per-route fields); ledger append raises on write
+  failure and traces link to audit entries; cache hits logged to stats;
+  trust/tenant-aware caches with re-filtering on hit; rubric skips fail
+  closed; Gemini tools sent as request fields; breaker probe accounting;
+  hub subdirectories preserved and configs structurally validated; zero
+  propensity rows excluded; exact-match `.env` key removal
 
 ## [1.1.0] - 2026-09-17
 

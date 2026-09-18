@@ -34,6 +34,7 @@ class SemanticEntry:
     model: str
     policy_version: str
     text_hash: str = ""
+    tenant: str = "default"
 
 
 class SemanticCache:
@@ -86,7 +87,14 @@ class SemanticCache:
         nb = math.sqrt(sum(x * x for x in b)) or 1.0
         return dot / (na * nb)
 
-    def put(self, query: str, response: str, model: str, policy_version: str = "1") -> None:
+    def put(
+        self,
+        query: str,
+        response: str,
+        model: str,
+        policy_version: str = "1",
+        tenant: str = "default",
+    ) -> None:
         vec = self._vector(query)
         text_hash = hashlib.sha256(query.encode()).hexdigest()
         self.entries.append(
@@ -96,10 +104,16 @@ class SemanticCache:
                 model=model,
                 policy_version=policy_version,
                 text_hash=text_hash,
+                tenant=tenant or "default",
             )
         )
 
-    def get(self, query: str, policy_version: Optional[str] = None) -> Optional[dict]:
+    def get(
+        self,
+        query: str,
+        policy_version: Optional[str] = None,
+        tenant: str = "default",
+    ) -> Optional[dict]:
         if not self.entries:
             return None
         vec = self._vector(query)
@@ -107,6 +121,8 @@ class SemanticCache:
         best_score = -1.0
         for entry in self.entries:
             if policy_version is not None and entry.policy_version != policy_version:
+                continue
+            if (entry.tenant or "default") != (tenant or "default"):
                 continue
             score = self._cosine(vec, entry.vector)
             if score > best_score:

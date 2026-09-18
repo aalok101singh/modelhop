@@ -15,10 +15,11 @@
     "constraints": {
       "type": "object",
       "properties": {
-        "trust": {
-          "type": "object",
-          "properties": {
-            "require_zdr": { "type": "boolean" },
+          "trust": {
+            "type": "object",
+            "properties": {
+              "require_zdr": { "type": "boolean" },
+              "zdr": { "type": "boolean", "description": "Alias of require_zdr" },
             "allowed_jurisdictions": { "type": "array", "items": { "type": "string" } },
             "max_sensitivity": { "type": "string", "enum": ["public", "internal", "confidential", "restricted"] },
             "min_safety_tier": { "type": "string", "enum": ["standard", "elevated", "high"] },

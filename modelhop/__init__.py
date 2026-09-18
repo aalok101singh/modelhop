@@ -1,3 +1,5 @@
+import hashlib
+import json as json_mod
 from typing import Dict, List
 
 from .config import Config
@@ -47,6 +49,25 @@ from .tracking.cost_tracker import CostTracker, PriceBook, estimate_cost
 from .tracking.hop_score import HopScore, is_optimal_hop
 from .tracking.ledger import DecisionLedger
 from .tracking.trace_logger import TraceLogger
+
+
+class _CacheTrustMiss(Exception):
+    """Internal: a cache hit failed current trust requirements (=> miss)."""
+
+
+def _tenant_of(context: dict) -> str:
+    """Canonical tenant: documented `tenant_tier` wins, legacy `tenant` fallback."""
+    context = context or {}
+    return str(context.get("tenant_tier", context.get("tenant", "default")))
+
+
+def _trust_digest(trust_required: dict) -> str:
+    """Canonical short hash of per-call trust requirements for cache keys."""
+    try:
+        raw = json_mod.dumps(trust_required or {}, sort_keys=True, default=str)
+    except Exception:
+        raw = str(sorted((trust_required or {}).items()))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
 class ModelHop:
@@ -218,7 +239,13 @@ class ModelHop:
         session = None
         if (task_id is not None or budget is not None) and self.sessions is not None:
             try:
-                session = self.sessions.create(task_id=task_id, budget=budget)
+                session = None
+                if task_id is not None:
+                    session = self.sessions.get_by_task(task_id)
+                if session is None:
+                    session = self.sessions.create(task_id=task_id, budget=budget)
+                elif budget is not None and session.budget is None:
+                    session.budget = budget
             except Exception:
                 session = None
 
@@ -287,13 +314,14 @@ class ModelHop:
         # Cache: exact -> semantic (miss => continue).
         cached = False
         cache_key = None
+        tenant = _tenant_of(context)
+        trust_hash = _trust_digest(trust_required)
         if self.exact_cache is not None:
             try:
                 from .cache.exact import cache_key as _ck
 
                 model_set_version = ",".join(sorted(m.name for m in self.models))
-                tenant = str(context.get("tenant", "default"))
-                cache_key = _ck(query, model_set_version, self.policy_version, tenant)
+                cache_key = _ck(query, model_set_version, self.policy_version, tenant, trust_hash)
                 hit = self.exact_cache.get(cache_key)
                 if (
                     hit
@@ -306,6 +334,7 @@ class ModelHop:
                         reasoning,
                         query_features,
                         analysis,
+                        query=query,
                         cache_key=cache_key,
                         trust_required=trust_required,
                     )
@@ -313,7 +342,9 @@ class ModelHop:
                 pass
         if self.semantic_cache is not None and not cached:
             try:
-                sem = self.semantic_cache.get(query, policy_version=self.policy_version)
+                sem = self.semantic_cache.get(
+                    query, policy_version=self.policy_version, tenant=tenant
+                )
                 if sem and sem.get("response"):
                     # Only use semantic hit when raw text storage is allowed.
                     hit = {
@@ -327,6 +358,7 @@ class ModelHop:
                         reasoning,
                         query_features,
                         analysis,
+                        query=query,
                         cache_key=cache_key,
                         trust_required=trust_required,
                         semantic=True,
@@ -384,7 +416,13 @@ class ModelHop:
                 pass
 
         response, confidence, decision, fallback_total = await self._generate_and_check_v11(
-            query, analysis, query_features, decision, trust_required=trust_required
+            query,
+            analysis,
+            query_features,
+            decision,
+            trust_required=trust_required,
+            eligible_names={m.name for m in candidates},
+            policy_ctx=policy_ctx,
         )
         # Verifier gate (generic): fail => escalate once to safest trusted model.
         verifier_result = None
@@ -469,20 +507,9 @@ class ModelHop:
             )
         except Exception:
             pass
-        self._finish_route_v11(
-            query,
-            query_features,
-            analysis,
-            decision,
-            response,
-            confidence,
-            fallback_total,
-            cost,
-            reward,
-            policy_ctx,
-            degraded,
-        )
-        # Ledger append (hash-chained, signed).
+        # Ledger append (hash-chained, signed) BEFORE the trace so the
+        # persisted trace can link to its audit entry. A failed append
+        # raises inside ledger.append and leaves ledger_id empty (honest).
         ledger_id = ""
         try:
             entry = self.ledger.append(
@@ -499,6 +526,20 @@ class ModelHop:
             ledger_id = f"{entry.get('seq', '')}:{entry.get('payload_hash', '')[:12]}"
         except Exception:
             pass
+        self._finish_route_v11(
+            query,
+            query_features,
+            analysis,
+            decision,
+            response,
+            confidence,
+            fallback_total,
+            cost,
+            reward,
+            policy_ctx,
+            degraded,
+            ledger_id=ledger_id,
+        )
         # OTel export (best-effort).
         try:
             from .tracking.otel import record_route as _otel_route
@@ -512,9 +553,13 @@ class ModelHop:
             )
         except Exception:
             pass
-        # Cache store.
+        # Cache store. Privacy first: no_raw_cache skips ALL raw-response
+        # persistence (exact SQLite and semantic), not just semantic.
+        allow_text = True
+        if isinstance(trust_required, dict) and trust_required.get("no_raw_cache"):
+            allow_text = False
         try:
-            if self.exact_cache is not None and cache_key:
+            if self.exact_cache is not None and cache_key and allow_text:
                 self.exact_cache.put(
                     cache_key,
                     {
@@ -525,16 +570,13 @@ class ModelHop:
                     },
                 )
             if self.semantic_cache is not None:
-                # Respect privacy: skip semantic store when policy forbids raw text.
-                allow_text = True
-                if isinstance(trust_required, dict) and trust_required.get("no_raw_cache"):
-                    allow_text = False
                 if allow_text:
                     self.semantic_cache.put(
                         query,
                         response.content,
                         decision.model.name,
                         policy_version=self.policy_version,
+                        tenant=tenant,
                     )
         except Exception:
             pass
@@ -623,12 +665,25 @@ class ModelHop:
         reasoning,
         query_features,
         analysis,
+        query: str = "",
         cache_key=None,
         trust_required=None,
         semantic: bool = False,
     ) -> RouteResult:
         model_name = hit.get("model", decision.model.name)
         model = self.registry.get_model(model_name) or decision.model
+        # Trust re-check: a hit cached under weaker requirements must not
+        # satisfy a stricter request. Raised => caller treats as a miss.
+        try:
+            from .core.trust import filter_by_trust
+
+            eligible, _ = filter_by_trust([model], self.trust_policy, trust_required or {})
+            if not eligible:
+                raise _CacheTrustMiss(f"cached model {model.name} fails current trust requirements")
+        except _CacheTrustMiss:
+            raise
+        except Exception:
+            pass
         content = hit.get("response", "")
         # Honest confidence for cache hits: high but marked.
         conf = ConfidenceResult(
@@ -661,6 +716,14 @@ class ModelHop:
             if hasattr(self.reasoning_engine, "explain")
             else reasoning
         )
+        pr = ProviderResponse(
+            content=content,
+            model_used=model.name,
+            provider=model.provider,
+            tokens_in=0,
+            tokens_out=0,
+            latency_ms=0,
+        )
         result = RouteResult(
             response=content,
             model=model.name,
@@ -676,21 +739,64 @@ class ModelHop:
             ledger_id="cache",
         )
         try:
-            pr = ProviderResponse(
-                content=content,
-                model_used=model.name,
-                provider=model.provider,
-                tokens_in=0,
-                tokens_out=0,
-                latency_ms=0,
-            )
             object.__setattr__(result, "_provider_response", pr)
+        except Exception:
+            pass
+        # Cache-hit accounting: zero-cost trace + ledger event so lifetime
+        # stats include served-from-cache requests (never a provider outcome:
+        # no memory/performance/bandit updates here).
+        try:
+            tracking = self.config.get_tracking_config()
+            if tracking.get("log_queries", True):
+                ledger_id = ""
+                try:
+                    entry = self.ledger.append(
+                        {
+                            "query": (query or "")[:500],
+                            "model": model.name,
+                            "tier": model.tier.value,
+                            "confidence": conf.score,
+                            "cost": 0.0,
+                            "cache_hit": True,
+                            "policy_version": self.policy_version,
+                        }
+                    )
+                    ledger_id = f"{entry.get('seq', '')}:{entry.get('payload_hash', '')[:12]}"
+                except Exception:
+                    pass
+                try:
+                    self.trace_logger.log(
+                        query=query or "",
+                        analysis=analysis,
+                        decision=decision,
+                        response=pr,
+                        confidence=conf,
+                        cost=cost,
+                        cache_hit=True,
+                        ledger_id=ledger_id or None,
+                        policy_version=self.policy_version,
+                    )
+                except Exception:
+                    pass
+                try:
+                    self.hop_score.update(is_optimal_hop(True, 0.0, 0.0))
+                except Exception:
+                    pass
+                if ledger_id:
+                    result.ledger_id = ledger_id
         except Exception:
             pass
         return result
 
     async def _generate_and_check_v11(
-        self, query, analysis, query_features, decision, trust_required=None
+        self,
+        query,
+        analysis,
+        query_features,
+        decision,
+        trust_required=None,
+        eligible_names=None,
+        policy_ctx=None,
     ):
         # Zero-API default: no provider passed to confidence; no consensus unless enabled.
         budget = self.fallback.max_retries + 1
@@ -704,7 +810,9 @@ class ModelHop:
             # Circuit-breaker skip.
             try:
                 if not self.health.allow(current.model.name):
-                    nxt = self._next_fallback_decision(current, tried, analysis)
+                    nxt = self._next_fallback_decision(
+                        current, tried, analysis, eligible_names, policy_ctx
+                    )
                     if nxt is None:
                         break
                     current = nxt
@@ -715,7 +823,9 @@ class ModelHop:
             provider = self.registry.get_provider(current.model.name)
             attempts += 1
             if provider is None:
-                nxt = self._next_fallback_decision(current, tried, analysis)
+                nxt = self._next_fallback_decision(
+                    current, tried, analysis, eligible_names, policy_ctx
+                )
                 if nxt is None:
                     break
                 current = nxt
@@ -732,7 +842,9 @@ class ModelHop:
                     self.health.record_failure(current.model.name, exc)
                 except Exception:
                     pass
-                nxt = self._next_fallback_decision(current, tried, analysis)
+                nxt = self._next_fallback_decision(
+                    current, tried, analysis, eligible_names, policy_ctx
+                )
                 if nxt is None:
                     break
                 current = nxt
@@ -751,12 +863,8 @@ class ModelHop:
                     ),
                     query_features=query_features,
                 )
-                # Record aux for accounting if consensus fired.
-                for aux in confidence.auxiliary_responses:
-                    try:
-                        self.cost_tracker.record_aux("consensus", aux)
-                    except Exception:
-                        pass
+                # Aux accounting flows through _route_cost -> calculate
+                # (single counting point); no separate record_aux here.
             else:
                 confidence = await self.confidence_engine.check(
                     query,
@@ -770,7 +878,7 @@ class ModelHop:
                 confidence = confidence.model_copy(update={"auxiliary_responses": all_aux})
                 return response, confidence, current, attempts - 1
             best = (current, response, confidence)
-            nxt = self._next_fallback_decision(current, tried, analysis)
+            nxt = self._next_fallback_decision(current, tried, analysis, eligible_names, policy_ctx)
             if nxt is None:
                 break
             current = nxt
@@ -816,12 +924,83 @@ class ModelHop:
                     sub.analysis, sub_features, trust_required=trust_required or {}
                 )
                 self.confidence_engine.threshold = self.adaptive_threshold.get_threshold()
+                # Policy-vet the sub-decision like the parent route: same
+                # budget/latency/trust/health gates, sub-query capabilities.
+                # Capability *coverage* stays best-effort (the router owns it):
+                # heuristic vocabularies routinely exceed config vocabularies
+                # (e.g. "technical"), and refusing those would break
+                # decomposition. Safety gates remain hard.
+                from .core.policy.engine import (
+                    CapabilityConstraint as _CapConstraint,
+                )
+                from .core.policy.engine import PolicyContext as _SubPolicyContext
+                from .core.policy.engine import PolicyEngine as _SubPolicyEngine
+
+                sub_vet_engine = self.policy_engine
+                try:
+                    if sub_vet_engine is not None:
+                        keep = [
+                            c
+                            for c in sub_vet_engine.constraints
+                            if not isinstance(c, _CapConstraint)
+                        ]
+                        if len(keep) != len(sub_vet_engine.constraints):
+                            sub_vet_engine = _SubPolicyEngine(
+                                constraints=keep,
+                                policy_version=sub_vet_engine.policy_version,
+                            )
+                except Exception:
+                    sub_vet_engine = self.policy_engine
+
+                sub_ctx = _SubPolicyContext(
+                    query_type=sub_features.query_type.value,
+                    complexity=sub.analysis.complexity,
+                    budget_remaining=(
+                        (session.budget - session.spent)
+                        if session is not None and session.budget
+                        else None
+                    ),
+                    cost_ceiling=(context or {}).get("cost_ceiling"),
+                    latency_slo_ms=(context or {}).get("latency_slo_ms"),
+                    trust_required=trust_required or {},
+                    tenant_tier=str((context or {}).get("tenant_tier", "default")),
+                    capabilities_needed=list(sub.analysis.capabilities_needed or []),
+                    estimated_tokens_in=int(sub.analysis.estimated_tokens or 100),
+                )
+                sub_eligible_names = None
+                if sub_vet_engine is not None:
+                    sub_cands = [sub_decision.model] + list(
+                        getattr(sub_decision, "alternatives", []) or []
+                    )
+                    sub_res = sub_vet_engine.evaluate(sub_cands, sub_ctx)
+                    if not sub_res.eligible:
+                        if self.fail_closed:
+                            raise RuntimeError(
+                                "Sub-query refused: policy excludes all candidates: "
+                                + "; ".join(sub_res.excluded)
+                            )
+                        sub_decision = RoutingDecision(
+                            model=parent_decision.model,
+                            tier=parent_decision.tier,
+                            reason="Policy fallback to parent model",
+                            alternatives=[],
+                        )
+                    else:
+                        sub_decision = RoutingDecision(
+                            model=sub_res.eligible[0],
+                            tier=sub_res.eligible[0].tier,
+                            reason=sub_decision.reason,
+                            alternatives=sub_res.eligible[1:],
+                        )
+                        sub_eligible_names = {m.name for m in sub_res.eligible}
                 resp, conf, final_decision, fb = await self._generate_and_check_v11(
                     sub.query,
                     sub.analysis,
                     sub_features,
                     sub_decision,
                     trust_required=trust_required,
+                    eligible_names=sub_eligible_names,
+                    policy_ctx=sub_ctx,
                 )
                 responses.append(resp)
                 confidences.append(conf.score)
@@ -1015,6 +1194,7 @@ class ModelHop:
         reward,
         policy_ctx,
         degraded,
+        ledger_id: str = "",
     ) -> None:
         tracking = self.config.get_tracking_config()
         log_queries = tracking.get("log_queries", True)
@@ -1054,6 +1234,7 @@ class ModelHop:
                 cost=cost,
                 fallback_count=fallback_count,
                 degraded=degraded,
+                ledger_id=ledger_id or None,
                 policy_version=self.policy_version,
             )
             self.shield.check_quality(trace)
@@ -1067,19 +1248,46 @@ class ModelHop:
                 return provider
         return None
 
-    def _next_fallback_decision(self, current_decision, tried_models, analysis=None):
+    def _next_fallback_decision(
+        self,
+        current_decision,
+        tried_models,
+        analysis=None,
+        eligible_names=None,
+        policy_ctx=None,
+    ):
+        """Next fallback restricted to the request's approved set.
+
+        Walks the cascade past models excluded by the policy-eligible set
+        and re-evaluates each candidate through the live policy context
+        (budget/latency/health). Rejections are added to the caller's tried
+        set. Returns None when nothing eligible remains.
+        """
         available = set(self.registry.get_available_providers())
-        model = self.fallback.next_candidate(
-            current_decision.model, analysis, set(tried_models), available
-        )
-        if model is None:
-            return None
-        return RoutingDecision(
-            model=model,
-            tier=model.tier,
-            reason=f"Fallback from {current_decision.model.name}",
-            alternatives=[],
-        )
+        tried = tried_models if isinstance(tried_models, set) else set(tried_models or [])
+        origin = current_decision.model.name
+        current_model = current_decision.model
+        while True:
+            model = self.fallback.next_candidate(current_model, analysis, tried, available)
+            if model is None:
+                return None
+            tried.add(model.name)
+            current_model = model
+            if eligible_names is not None and model.name not in eligible_names:
+                continue
+            if policy_ctx is not None and self.policy_engine is not None:
+                try:
+                    res = self.policy_engine.evaluate([model], policy_ctx)
+                except Exception:
+                    continue
+                if not res.eligible:
+                    continue
+            return RoutingDecision(
+                model=model,
+                tier=model.tier,
+                reason=f"Fallback from {origin}",
+                alternatives=[],
+            )
 
     def _resolve_cost_model(self, name: str, fallback: ModelConfig) -> ModelConfig:
         model = self.registry.get_model(name)
@@ -1093,6 +1301,7 @@ class ModelHop:
     def _confidence_aux_cost(self, confidence: ConfidenceResult, model: ModelConfig):
         extra_actual = 0.0
         extra_would = 0.0
+        extra_count = 0
         for aux in confidence.auxiliary_responses:
             aux_model = self._resolve_cost_model(aux.model_used, model)
             aux_cost = estimate_cost(
@@ -1103,13 +1312,18 @@ class ModelHop:
             )
             extra_actual += aux_cost.actual_cost
             extra_would += aux_cost.would_have_cost
-        return extra_actual, extra_would
+            extra_count += 1
+        return extra_actual, extra_would, extra_count
 
     def _route_cost(self, response, model, confidence) -> CostAnalysis:
-        extra_actual, extra_would = self._confidence_aux_cost(confidence, model)
+        extra_actual, extra_would, extra_count = self._confidence_aux_cost(confidence, model)
         if self.config.get_tracking_config().get("log_costs", True):
             return self.cost_tracker.calculate(
-                response, model, extra_actual=extra_actual, extra_would=extra_would
+                response,
+                model,
+                extra_actual=extra_actual,
+                extra_would=extra_would,
+                extra_aux_calls=extra_count,
             )
         base = estimate_cost(
             response,

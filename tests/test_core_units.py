@@ -52,7 +52,7 @@ def test_breaker_half_open_probe_limit():
     b = CircuitBreaker(failure_threshold=1, recovery_timeout_s=0.0, half_open_max=1)
     b.record_failure("m", transient=True)
     assert b.allow("m") is True  # OPEN -> HALF_OPEN transition permits entry
-    assert b.allow("m") is True  # single bounded probe
+    assert b.allow("m") is False  # opening probe counts against the budget
     assert b.allow("m") is False  # probe budget spent
     b.record_failure("m", transient=True)  # half-open failure re-opens
     assert b.state("m") in ("open", "half_open")

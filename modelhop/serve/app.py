@@ -44,11 +44,11 @@ def create_app(mh=None):
     _hits: dict = defaultdict(list)
 
     def _check_auth(authorization: Optional[str] = Header(default=None)):
-        expected = None
         try:
             expected = secrets.get("MODELHOP_API_KEY") or secrets.get("OPENAI_API_KEY")
         except Exception:
-            expected = None
+            # Fail closed: a broken secret backend must never open the server.
+            raise HTTPException(status_code=503, detail="Secret backend unavailable")
         # If no server key configured, allow (single-user local default).
         if not expected:
             return True
@@ -105,11 +105,35 @@ def create_app(mh=None):
         stream = bool(payload.get("stream", False))
 
         if model_req != "auto":
-            # Explicit-model passthrough.
+            # Explicit model, still gated by the server's trust + health
+            # policy (never a raw passthrough).
             provider = mh.registry.get_provider(model_req)
             cfg = mh.registry.get_model(model_req)
             if provider is None or cfg is None:
                 raise HTTPException(status_code=404, detail=f"Model {model_req} not found")
+            try:
+                from modelhop.core.trust import filter_by_trust
+
+                eligible, _ = filter_by_trust([cfg], getattr(mh, "trust_policy", None) or {}, {})
+                if not eligible:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Model {model_req} excluded by server trust policy",
+                    )
+            except HTTPException:
+                raise
+            except Exception:
+                pass
+            try:
+                health = getattr(mh, "health", None)
+                if health is not None and hasattr(health, "allow") and not health.allow(cfg.name):
+                    raise HTTPException(
+                        status_code=503, detail=f"Model {model_req} temporarily unhealthy"
+                    )
+            except HTTPException:
+                raise
+            except Exception:
+                pass
             try:
                 resp = await provider.generate(query)
             except Exception as exc:
